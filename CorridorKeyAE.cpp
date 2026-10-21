@@ -559,14 +559,18 @@ PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
                                 const char* inHostName,
                                 const char* inHostVersion)
 {
-    return PF_REGISTER_EFFECT_EXT2(inPtr,
-                                   inPluginDataCallBackPtr,
-                                   "CorridorKey AE",
-                                   CK_MATCH_NAME,
-                                   "Keying",
-                                   AE_RESERVED_INFO,
-                                   "EffectMain",
-                                   "https://corridorkey.com");
+    // PF_REGISTER_EFFECT_EXT2 assigns into a local named 'result'.
+    PF_Err result = PF_Err_INVALID_CALLBACK;
+
+    result = PF_REGISTER_EFFECT_EXT2(inPtr,
+                                     inPluginDataCallBackPtr,
+                                     "CorridorKey AE",
+                                     CK_MATCH_NAME,
+                                     "Keying",
+                                     AE_RESERVED_INFO,
+                                     "EffectMain",
+                                     "https://corridorkey.com");
+    return result;
 }
 
 PF_Err EffectMain(PF_Cmd cmd,
