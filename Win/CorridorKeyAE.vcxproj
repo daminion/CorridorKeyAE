@@ -328,6 +328,8 @@
     <ClCompile Include="..\..\..\Util\MissingSuiteError.cpp" />
     <ClCompile Include="..\CorridorKeyAE.cpp" />
     <ClCompile Include="..\CK_Platform_Win.cpp" />
+    <ClCompile Include="..\CK_Job.cpp" />
+    <ClCompile Include="..\CorridorKeyAE_UI.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\Headers\AE_PluginData.h" />
@@ -337,6 +339,7 @@
     <ClInclude Include="..\..\..\Util\String_Utils.h" />
     <ClInclude Include="..\CorridorKeyAE.h" />
     <ClInclude Include="..\CK_Platform.h" />
+    <ClInclude Include="..\CK_Job.h" />
     <ClInclude Include="..\..\..\Headers\A.h" />
     <ClInclude Include="..\..\..\Headers\AE_AdvEffectSuites.h" />
     <ClInclude Include="..\..\..\Headers\AE_Effect.h" />

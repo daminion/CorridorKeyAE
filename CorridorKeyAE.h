@@ -17,29 +17,36 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 1
+#define MINOR_VERSION 2
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
 
 #define CK_MATCH_NAME "Minion CorridorKeyAE"
 #define CK_PATH_MAX 1024
-#define CK_ARB_VERSION 1
+#define CK_ARB_VERSION 2
 
-// Per-effect settings that must persist with the project and do not
-// animate. Fixed-size POD so flatten/unflatten is a straight copy.
+// Per-effect state that persists with the project and does not animate.
+// Fixed-size POD so flatten/unflatten is a straight copy. Only ever append
+// fields; unflatten zero-fills anything an older project didn't have.
 typedef struct CK_EffectData
 {
     A_long version;
     char cache_override[CK_PATH_MAX];   // UTF-8, empty = use global default
+    // v2
+    char job_dir[CK_PATH_MAX];          // UTF-8 folder of the current key job
+    A_long frames_total;                // expected frame count of that job
+    A_long generation;                  // bumps when a job starts/finishes (forces re-render)
+    A_long reserved[8];
 } CK_EffectData;
 
-// Parameter order. Never reorder or remove entries once projects exist;
-// add new ones at the end (before CK_NUM_PARAMS) with new disk IDs.
+// Parameter order. Fixed from milestone 2 on: only append new params
+// (before CK_NUM_PARAMS) with new disk IDs.
 enum
 {
     CK_INPUT = 0,
     CK_KEY_CLIP,
+    CK_STATUS,              // arbitrary param: draws status, holds CK_EffectData
     CK_OUTPUT_MODE,
     CK_DESPILL,
     CK_MATTE_CHOKE,
@@ -53,7 +60,6 @@ enum
     CK_CHOOSE_CACHE,
     CK_RESET_CACHE,
     CK_EDIT_SETTINGS,
-    CK_EFFECT_DATA,
     CK_CACHE_END,
     CK_NUM_PARAMS
 };
@@ -74,7 +80,7 @@ enum
     CHOOSE_CACHE_DISK_ID,
     RESET_CACHE_DISK_ID,
     EDIT_SETTINGS_DISK_ID,
-    EFFECT_DATA_DISK_ID,
+    STATUS_DISK_ID,
     CACHE_END_DISK_ID
 };
 
@@ -88,6 +94,18 @@ enum
     CK_OUT_ORIGINAL,
     CK_OUT_NUM = CK_OUT_ORIGINAL
 };
+
+#define CK_STATUS_UI_WIDTH  260
+#define CK_STATUS_UI_HEIGHT 22
+
+// Shared between CorridorKeyAE.cpp and CorridorKeyAE_UI.cpp
+bool CK_ReadEffectData(PF_InData* in_data, PF_ParamDef* params[], CK_EffectData* out);
+
+PF_Err CK_HandleEvent(PF_InData* in_data,
+                      PF_OutData* out_data,
+                      PF_ParamDef* params[],
+                      PF_LayerDef* output,
+                      PF_EventExtra* extra);
 
 extern "C" {
     DllExport PF_Err EffectMain(

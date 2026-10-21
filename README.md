@@ -9,7 +9,12 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
 
 ## Status
 
-**Milestone 1, in testing.** This covers the parameter layout, the global settings file, per-effect cache folder override and a pass-through render. Key Clip currently reports the resolved setup instead of keying.
+- Milestone 1 (done): parameter layout, settings file, per-effect cache folder, pass-through render.
+- **Milestone 2 (testing):** Key Clip runs CorridorKey in the background (EXR alpha + fg into the cache), and the Status line shows progress. Clicking Key Clip again while it runs offers to cancel.
+- Milestone 3: render the cached result (Output, Despill, Matte Choke, Matte Gamma).
+- Milestone 4: Hint Mask → first-frame hint.
+
+Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it.
 
 ## Layout
 

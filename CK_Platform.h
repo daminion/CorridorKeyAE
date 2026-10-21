@@ -37,3 +37,31 @@ bool CK_ChooseFolder(const std::string& start_utf8, std::string& chosen_utf8);
 void CK_OpenSettingsFile(const CK_GlobalSettings& gs);
 
 void CK_ShowMessage(const char* title_utf8, const std::string& body_utf8);
+
+// ---- milestone 2: background jobs --------------------------------------
+
+bool CK_MakeDirs(const std::string& path_utf8);
+bool CK_RemoveFile(const std::string& path_utf8);
+bool CK_WriteTextFile(const std::string& path_utf8, const std::string& text);
+std::string CK_ReadTextFile(const std::string& path_utf8);   // small files only
+
+// "<size>-<mtime>" for change detection; empty if the file is missing.
+std::string CK_FileStamp(const std::string& path_utf8);
+
+// Runs a cmd.exe command line hidden, in workdir. Returns false on failure.
+bool CK_LaunchHidden(const std::string& cmd_line_utf8,
+                     const std::string& workdir_utf8,
+                     unsigned long* pid_out);
+bool CK_ProcessAlive(unsigned long pid);
+void CK_KillProcessTree(unsigned long pid);
+
+// Counts *.exr in the first subfolder of dir whose name ends with suffix.
+int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix);
+
+unsigned long CK_TickMs();
+bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8);
+void CK_OpenInEditor(const std::string& file_utf8);
+void CK_OpenFolder(const std::string& dir_utf8);
+
+// AE hands file paths over as null-terminated UTF-16.
+std::string CK_FromUtf16(const unsigned short* s);

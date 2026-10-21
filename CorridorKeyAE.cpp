@@ -1,11 +1,12 @@
 // CorridorKey AE - After Effects wrapper for CorridorKey 2.0
 //
-// Milestone 1: parameter layout, global settings file, per-effect cache
-// folder override, SmartFX pass-through render. Key Clip reports the
-// resolved setup instead of keying.
+// Milestone 2: Key Clip runs CorridorKey in the background into the cache
+// folder and the Status control shows progress. Render is still a
+// pass-through; reading the cached EXRs is milestone 3.
 
 #include "CorridorKeyAE.h"
 #include "CK_Platform.h"
+#include "CK_Job.h"
 
 #include <cstring>
 #include <cstdio>
@@ -125,6 +126,7 @@ static PF_Err HandleArbitrary(PF_InData* in_data,
                 std::memcpy(dst, extra->u.unflatten_func_params.flat_dataPV, n);
                 dst->version = CK_ARB_VERSION;
                 dst->cache_override[CK_PATH_MAX - 1] = '\0';
+                dst->job_dir[CK_PATH_MAX - 1] = '\0';
             }
 
             suites.HandleSuite1()->host_unlock_handle(*extra->u.unflatten_func_params.arbPH);
@@ -167,9 +169,9 @@ static PF_Err HandleArbitrary(PF_InData* in_data,
             {
                 std::snprintf(extra->u.print_func_params.print_bufferPC,
                               extra->u.print_func_params.print_sizeLu,
-                              "CorridorKeyAE v%d cache=%s",
+                              "CorridorKeyAE v%d job=%s",
                               static_cast<int>(d->version),
-                              d->cache_override[0] ? d->cache_override : "(default)");
+                              d->job_dir[0] ? d->job_dir : "(none)");
                 suites.HandleSuite1()->host_unlock_handle(extra->u.print_func_params.arbH);
             }
             break;
@@ -212,7 +214,8 @@ static PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data,
                                       BUILD_VERSION);
 
     // Must match AE_Effect_Global_OutFlags / _2 in CorridorKeyAE_PiPL.r
-    out_data->out_flags  |= PF_OutFlag_DEEP_COLOR_AWARE;
+    out_data->out_flags  |= PF_OutFlag_DEEP_COLOR_AWARE |
+                            PF_OutFlag_CUSTOM_UI;
     out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_SMART_RENDER |
                             PF_OutFlag2_FLOAT_COLOR_AWARE |
                             PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
@@ -231,6 +234,20 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                   0,
                   PF_ParamFlag_SUPERVISE | PF_ParamFlag_CANNOT_TIME_VARY,
                   KEY_CLIP_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ArbitraryH default_arbH = NULL;
+    ERR(NewEffectData(in_data, &default_arbH));
+    if (err)
+        return err;
+    PF_ADD_ARBITRARY2(STR(StrID_Status_Name),
+                      CK_STATUS_UI_WIDTH,
+                      CK_STATUS_UI_HEIGHT,
+                      PF_ParamFlag_CANNOT_TIME_VARY,
+                      PF_PUI_CONTROL,
+                      default_arbH,
+                      STATUS_DISK_ID,
+                      NULL);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX(STR(StrID_OutputMode_Name),
@@ -318,55 +335,50 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                   EDIT_SETTINGS_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
-    PF_ArbitraryH default_arbH = NULL;
-    ERR(NewEffectData(in_data, &default_arbH));
+    PF_END_TOPIC(CACHE_END_DISK_ID);
+
     if (!err)
     {
-        PF_ADD_ARBITRARY2(STR(StrID_EffectData_Name),
-                          0,
-                          0,
-                          PF_ParamFlag_CANNOT_TIME_VARY,
-                          PF_PUI_NO_ECW_UI,
-                          default_arbH,
-                          EFFECT_DATA_DISK_ID,
-                          NULL);
+        PF_CustomUIInfo ci;
+        AEFX_CLR_STRUCT(ci);
+        ci.events = PF_CustomEFlag_EFFECT;
+        err = (*(in_data->inter.register_ui))(in_data->effect_ref, &ci);
     }
-
-    AEFX_CLR_STRUCT(def);
-    PF_END_TOPIC(CACHE_END_DISK_ID);
 
     out_data->num_params = CK_NUM_PARAMS;
     return err;
 }
 
 // ---------------------------------------------------------------------------
-// Buttons
+// Effect data access (the Status arbitrary param)
 // ---------------------------------------------------------------------------
 
-static std::string ReadCacheOverride(PF_InData* in_data, PF_ParamDef* params[])
+bool CK_ReadEffectData(PF_InData* in_data, PF_ParamDef* params[], CK_EffectData* out)
 {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
-    std::string out;
-    PF_ArbitraryH h = params[CK_EFFECT_DATA]->u.arb_d.value;
+    InitEffectData(out);
+
+    PF_ArbitraryH h = params[CK_STATUS]->u.arb_d.value;
     if (!h)
-        return out;
+        return false;
 
     CK_EffectData* d = reinterpret_cast<CK_EffectData*>(
         suites.HandleSuite1()->host_lock_handle(h));
-    if (d)
-    {
-        d->cache_override[CK_PATH_MAX - 1] = '\0';
-        out = d->cache_override;
-        suites.HandleSuite1()->host_unlock_handle(h);
-    }
-    return out;
+    if (!d)
+        return false;
+
+    std::memcpy(out, d, sizeof(CK_EffectData));
+    suites.HandleSuite1()->host_unlock_handle(h);
+    out->cache_override[CK_PATH_MAX - 1] = '\0';
+    out->job_dir[CK_PATH_MAX - 1] = '\0';
+    return true;
 }
 
-static PF_Err WriteCacheOverride(PF_InData* in_data, PF_ParamDef* params[],
-                                 const std::string& path)
+static PF_Err WriteEffectData(PF_InData* in_data, PF_ParamDef* params[],
+                              const CK_EffectData& data)
 {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
-    PF_ArbitraryH h = params[CK_EFFECT_DATA]->u.arb_d.value;
+    PF_ArbitraryH h = params[CK_STATUS]->u.arb_d.value;
     if (!h)
         return PF_Err_BAD_CALLBACK_PARAM;
 
@@ -375,13 +387,18 @@ static PF_Err WriteCacheOverride(PF_InData* in_data, PF_ParamDef* params[],
     if (!d)
         return PF_Err_OUT_OF_MEMORY;
 
+    std::memcpy(d, &data, sizeof(CK_EffectData));
     d->version = CK_ARB_VERSION;
-    std::memset(d->cache_override, 0, CK_PATH_MAX);
-    std::strncpy(d->cache_override, path.c_str(), CK_PATH_MAX - 1);
     suites.HandleSuite1()->host_unlock_handle(h);
 
-    params[CK_EFFECT_DATA]->uu.change_flags = PF_ChangeFlag_CHANGED_VALUE;
+    params[CK_STATUS]->uu.change_flags = PF_ChangeFlag_CHANGED_VALUE;
     return PF_Err_NONE;
+}
+
+static void SetPathField(char* field, const std::string& value)
+{
+    std::memset(field, 0, CK_PATH_MAX);
+    std::strncpy(field, value.c_str(), CK_PATH_MAX - 1);
 }
 
 // "ready", "will be created", or "OFFLINE" for a folder that should hold cache.
@@ -406,45 +423,181 @@ static const char* DescribeCacheFolder(const std::string& path)
     return "OFFLINE (drive or share not connected)";
 }
 
-static void ReportSetup(PF_InData* in_data, PF_ParamDef* params[])
+// ---------------------------------------------------------------------------
+// Layer source lookup
+// ---------------------------------------------------------------------------
+
+static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& error)
 {
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    PF_Err err = PF_Err_NONE;
+
+    AEGP_LayerH layerH = NULL;
+    AEGP_ItemH itemH = NULL;
+    AEGP_ItemType type = AEGP_ItemType_NONE;
+
+    ERR(suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layerH));
+    if (!err && layerH)
+        ERR(suites.LayerSuite9()->AEGP_GetLayerSourceItem(layerH, &itemH));
+    if (!err && itemH)
+        ERR(suites.ItemSuite9()->AEGP_GetItemType(itemH, &type));
+
+    if (err || !itemH)
+    {
+        error = "Couldn't find this layer's source.";
+        return false;
+    }
+    if (type != AEGP_ItemType_FOOTAGE)
+    {
+        error = "Key Clip works on footage layers (a movie file or image sequence).\n\n"
+                "Precomps aren't supported yet - apply the effect to the footage itself.";
+        return false;
+    }
+
+    AEGP_FootageH footageH = NULL;
+    A_long num_files = 0, files_per_frame = 0;
+    AEGP_MemHandle pathH = NULL;
+
+    ERR(suites.FootageSuite5()->AEGP_GetMainFootageFromItem(itemH, &footageH));
+    if (!err && footageH)
+        ERR(suites.FootageSuite5()->AEGP_GetFootageNumFiles(footageH, &num_files, &files_per_frame));
+    if (!err && footageH)
+        ERR(suites.FootageSuite5()->AEGP_GetFootagePath(footageH, 0,
+                                                        AEGP_FOOTAGE_MAIN_FILE_INDEX, &pathH));
+    if (!err && pathH)
+    {
+        A_UTF16Char* p = NULL;
+        ERR(suites.MemorySuite1()->AEGP_LockMemHandle(pathH, reinterpret_cast<void**>(&p)));
+        if (!err && p)
+            req.source_path = CK_FromUtf16(reinterpret_cast<const unsigned short*>(p));
+        suites.MemorySuite1()->AEGP_UnlockMemHandle(pathH);
+        suites.MemorySuite1()->AEGP_FreeMemHandle(pathH);
+    }
+
+    if (err || req.source_path.empty() || !CK_FileExists(req.source_path))
+    {
+        error = req.source_path.empty()
+                    ? "This layer has no source file (solid, text or placeholder)."
+                    : "The source file is missing:\n  " + req.source_path;
+        return false;
+    }
+
+    req.is_sequence = num_files > 1;
+
+    AEGP_FootageInterp interp;
+    AEFX_CLR_STRUCT(interp);
+    if (!suites.FootageSuite5()->AEGP_GetFootageInterpretation(itemH, FALSE, &interp))
+        req.fps = interp.conform_fpsF > 0 ? interp.conform_fpsF : interp.native_fpsF;
+    if (req.fps <= 0)
+        req.fps = 24.0;
+
+    A_Time dur;
+    AEFX_CLR_STRUCT(dur);
+    if (!suites.ItemSuite9()->AEGP_GetItemDuration(itemH, &dur) && dur.scale)
+        req.frames_total = (int)((double)dur.value / (double)dur.scale * req.fps + 0.5);
+    if (req.is_sequence && num_files > 0)
+        req.frames_total = num_files;
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Buttons
+// ---------------------------------------------------------------------------
+
+static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[])
+{
+    PF_Err err = PF_Err_NONE;
+    const char* title = "CorridorKey AE";
+
+    CK_EffectData data;
+    CK_ReadEffectData(in_data, params, &data);
+
+    // 1. Is CorridorKey installed?
     CK_GlobalSettings gs = CK_LoadGlobalSettings();
-    std::string override_path = ReadCacheOverride(in_data, params);
-    std::string cache = CK_ResolveCacheRoot(override_path.c_str(), gs);
     std::string python = CK_ResolvePythonExe(gs);
+    if (gs.corridorkey_dir.empty() ||
+        !CK_FileExists(gs.corridorkey_dir + "\\infer.py") ||
+        !CK_FileExists(python))
+    {
+        CK_ShowMessage(title,
+            "CorridorKey isn't set up yet.\n\n"
+            "Run tools\\CorridorKey_Setup.bat from the CorridorKeyAE folder,\n"
+            "or set corridorkey_dir in Global Settings.\n\n"
+            "Settings file:\n  " + gs.settings_file);
+        return err;
+    }
 
-    const char* cache_src = !override_path.empty() ? "this effect"
-                          : !gs.cache_root.empty() ? "settings.ini"
-                          : "built-in default";
+    // 2. A job already linked to this effect?
+    if (data.job_dir[0])
+    {
+        CK_JobStatus st = CK_QueryJob(data.job_dir);
+        if (st.state == CK_JOB_RUNNING)
+        {
+            if (CK_AskYesNo(title, "CorridorKey is keying this clip.\n\nCancel it?"))
+            {
+                CK_CancelJob(data.job_dir);
+                data.generation++;
+                err = WriteEffectData(in_data, params, data);
+            }
+            return err;
+        }
+        if (st.state == CK_JOB_FAILED)
+        {
+            CK_OpenInEditor(CK_JobLogPath(data.job_dir));
+            if (!CK_AskYesNo(title, "The last key failed. Its log is open in Notepad.\n\nTry again?"))
+                return err;
+        }
+    }
 
-    std::string infer = gs.corridorkey_dir.empty()
-                            ? std::string()
-                            : gs.corridorkey_dir + "\\infer.py";
+    // 3. What are we keying, and with which settings?
+    CK_JobRequest req;
+    std::string error;
+    if (!GetLayerSource(in_data, req, error))
+    {
+        CK_ShowMessage(title, error);
+        return err;
+    }
+    req.hint_quality = (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0);
+    req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
 
-    std::string msg;
-    msg += "Keying isn't wired up yet (milestone 1). Current setup:\n\n";
+    // 4. Where does it go?
+    std::string cache_root = CK_ResolveCacheRoot(data.cache_override, gs);
+    std::string state = DescribeCacheFolder(cache_root);
+    if (state.compare(0, 7, "OFFLINE") == 0)
+    {
+        CK_ShowMessage(title, "The cache folder is offline:\n  " + cache_root +
+                              "\n\nReconnect the drive, or choose another folder under Cache.");
+        return err;
+    }
 
-    msg += "CorridorKey folder:\n  ";
-    msg += gs.corridorkey_dir.empty() ? "(not set)" : gs.corridorkey_dir;
-    msg += gs.corridorkey_dir.empty() ? ""
-         : CK_FileExists(infer) ? "   [infer.py found]" : "   [infer.py NOT found]";
+    std::string job_dir = CK_JobDirFor(cache_root, req);
+    CK_JobStatus existing = CK_QueryJob(job_dir);
 
-    msg += "\n\nPython:\n  ";
-    msg += python.empty() ? "(not set)" : python;
-    msg += python.empty() ? "" : CK_FileExists(python) ? "   [found]" : "   [NOT found]";
+    if (existing.state == CK_JOB_RUNNING)
+    {
+        CK_ShowMessage(title, "This clip is already being keyed with these settings\n"
+                              "(probably by another copy of the effect).\n\n"
+                              "This effect will show the same progress.");
+    }
+    else if (existing.state == CK_JOB_DONE &&
+             !CK_AskYesNo(title, "This clip is already keyed with these settings.\n\n"
+                                 "Key it again from scratch?"))
+    {
+        // Just relink to the existing result.
+    }
+    else if (!CK_StartJob(job_dir, req, python, gs.corridorkey_dir, error))
+    {
+        CK_ShowMessage(title, error);
+        return err;
+    }
 
-    msg += "\n\nCache folder (from ";
-    msg += cache_src;
-    msg += "):\n  ";
-    msg += cache;
-    msg += "   [";
-    msg += DescribeCacheFolder(cache);
-    msg += "]";
-
-    msg += "\n\nSettings file:\n  ";
-    msg += gs.settings_file;
-
-    CK_ShowMessage("CorridorKey AE", msg);
+    SetPathField(data.job_dir, job_dir);
+    data.frames_total = req.frames_total;
+    data.generation++;
+    err = WriteEffectData(in_data, params, data);
+    out_data->out_flags |= PF_OutFlag_REFRESH_UI;
+    return err;
 }
 
 static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
@@ -456,33 +609,38 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
     switch (extra->param_index)
     {
         case CK_KEY_CLIP:
-            ReportSetup(in_data, params);
+            err = DoKeyClip(in_data, out_data, params);
             break;
 
         case CK_CHOOSE_CACHE:
         {
+            CK_EffectData data;
+            CK_ReadEffectData(in_data, params, &data);
             CK_GlobalSettings gs = CK_LoadGlobalSettings();
-            std::string current = CK_ResolveCacheRoot(
-                ReadCacheOverride(in_data, params).c_str(), gs);
+            std::string current = CK_ResolveCacheRoot(data.cache_override, gs);
             std::string chosen;
             if (CK_ChooseFolder(current, chosen))
             {
-                err = WriteCacheOverride(in_data, params, chosen);
+                SetPathField(data.cache_override, chosen);
+                err = WriteEffectData(in_data, params, data);
                 if (!err)
                     CK_ShowMessage("CorridorKey AE",
-                                   "This effect will cache to:\n  " + chosen);
+                                   "This effect will cache new keys to:\n  " + chosen);
             }
             break;
         }
 
         case CK_RESET_CACHE:
         {
-            err = WriteCacheOverride(in_data, params, std::string());
+            CK_EffectData data;
+            CK_ReadEffectData(in_data, params, &data);
+            SetPathField(data.cache_override, std::string());
+            err = WriteEffectData(in_data, params, data);
             if (!err)
             {
                 CK_GlobalSettings gs = CK_LoadGlobalSettings();
                 CK_ShowMessage("CorridorKey AE",
-                               "This effect now uses the default cache folder:\n  " +
+                               "This effect now caches new keys to the default folder:\n  " +
                                CK_ResolveCacheRoot("", gs));
             }
             break;
@@ -500,7 +658,7 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
 }
 
 // ---------------------------------------------------------------------------
-// SmartFX render (pass-through for milestone 1)
+// SmartFX render (pass-through until milestone 3)
 // ---------------------------------------------------------------------------
 
 static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
@@ -611,6 +769,11 @@ PF_Err EffectMain(PF_Cmd cmd,
             case PF_Cmd_SMART_RENDER:
                 err = SmartRender(in_data, out_data,
                                   reinterpret_cast<PF_SmartRenderExtra*>(extra));
+                break;
+
+            case PF_Cmd_EVENT:
+                err = CK_HandleEvent(in_data, out_data, params, output,
+                                     reinterpret_cast<PF_EventExtra*>(extra));
                 break;
 
             case PF_Cmd_ARBITRARY_CALLBACK:

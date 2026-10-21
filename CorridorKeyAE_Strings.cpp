@@ -27,7 +27,7 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_ResetCache_Button,     "Reset",
     StrID_EditSettings_Name,     "Global Settings",
     StrID_EditSettings_Button,   "Open...",
-    StrID_EffectData_Name,       "Effect Data",
+    StrID_Status_Name,           "Status",
     StrID_Err_LoadSuite,         "Error loading suite.",
     StrID_Err_FreeSuite,         "Error releasing suite."
 };

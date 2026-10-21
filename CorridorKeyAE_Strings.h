@@ -22,7 +22,7 @@ typedef enum {
     StrID_ResetCache_Button,
     StrID_EditSettings_Name,
     StrID_EditSettings_Button,
-    StrID_EffectData_Name,
+    StrID_Status_Name,
     StrID_Err_LoadSuite,
     StrID_Err_FreeSuite,
     StrID_NUMTYPES

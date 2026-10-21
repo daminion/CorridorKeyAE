@@ -9,6 +9,8 @@
 
 #include <windows.h>
 #include <cstring>
+#include <cstdio>
+#include <cwchar>
 #include <shobjidl.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -215,4 +217,174 @@ void CK_ShowMessage(const char* title_utf8, const std::string& body_utf8)
     MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
                 Widen(title_utf8 ? title_utf8 : "CorridorKey AE").c_str(),
                 MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+}
+
+// ---- milestone 2: background jobs --------------------------------------
+
+bool CK_MakeDirs(const std::string& path_utf8)
+{
+    if (path_utf8.empty()) return false;
+    int r = SHCreateDirectoryExW(NULL, Widen(path_utf8).c_str(), NULL);
+    return r == ERROR_SUCCESS || r == ERROR_ALREADY_EXISTS || r == ERROR_FILE_EXISTS ||
+           CK_DirExists(path_utf8);
+}
+
+bool CK_RemoveFile(const std::string& path_utf8)
+{
+    return DeleteFileW(Widen(path_utf8).c_str()) != 0;
+}
+
+bool CK_WriteTextFile(const std::string& path_utf8, const std::string& text)
+{
+    HANDLE h = CreateFileW(Widen(path_utf8).c_str(), GENERIC_WRITE, 0, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    BOOL ok = WriteFile(h, text.data(), (DWORD)text.size(), &written, NULL);
+    CloseHandle(h);
+    return ok && written == text.size();
+}
+
+std::string CK_ReadTextFile(const std::string& path_utf8)
+{
+    std::string out;
+    HANDLE h = CreateFileW(Widen(path_utf8).c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    char buf[4096];
+    DWORD got = 0;
+    if (ReadFile(h, buf, sizeof(buf), &got, NULL) && got > 0)
+        out.assign(buf, got);
+    CloseHandle(h);
+    return out;
+}
+
+std::string CK_FileStamp(const std::string& path_utf8)
+{
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExW(Widen(path_utf8).c_str(), GetFileExInfoStandard, &fa))
+        return std::string();
+    char buf[64];
+    unsigned long long size = ((unsigned long long)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
+    unsigned long long t = ((unsigned long long)fa.ftLastWriteTime.dwHighDateTime << 32) |
+                           fa.ftLastWriteTime.dwLowDateTime;
+    snprintf(buf, sizeof(buf), "%llu-%llu", size, t);
+    return buf;
+}
+
+bool CK_LaunchHidden(const std::string& cmd_line_utf8,
+                     const std::string& workdir_utf8,
+                     unsigned long* pid_out)
+{
+    // cmd /s /c "..." strips exactly the outer quotes and runs the rest.
+    std::wstring line = L"cmd.exe /d /s /c \"" + Widen(cmd_line_utf8) + L"\"";
+    std::wstring wd = Widen(workdir_utf8);
+
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    BOOL ok = CreateProcessW(NULL, &line[0], NULL, NULL, FALSE,
+                             CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | BELOW_NORMAL_PRIORITY_CLASS,
+                             NULL, wd.empty() ? NULL : wd.c_str(), &si, &pi);
+    if (!ok) return false;
+    if (pid_out) *pid_out = pi.dwProcessId;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
+bool CK_ProcessAlive(unsigned long pid)
+{
+    if (!pid) return false;
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) return false;
+    DWORD code = 0;
+    BOOL ok = GetExitCodeProcess(h, &code);
+    CloseHandle(h);
+    return ok && code == STILL_ACTIVE;
+}
+
+void CK_KillProcessTree(unsigned long pid)
+{
+    if (!pid) return;
+    wchar_t cmd[128];
+    swprintf(cmd, 128, L"taskkill.exe /T /F /PID %lu", pid);
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+    if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
+    {
+        WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+}
+
+int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix)
+{
+    std::wstring dir = Widen(dir_utf8);
+    std::wstring suf = Widen(suffix ? suffix : "");
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+
+    std::wstring sub;
+    do
+    {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        std::wstring name = fd.cFileName;
+        if (name.size() >= suf.size() &&
+            name.compare(name.size() - suf.size(), suf.size(), suf) == 0)
+        {
+            sub = dir + L"\\" + name;
+            break;
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    if (sub.empty()) return 0;
+
+    int count = 0;
+    h = FindFirstFileW((sub + L"\\*.exr").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do
+    {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) ++count;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return count;
+}
+
+unsigned long CK_TickMs()
+{
+    return (unsigned long)GetTickCount64();
+}
+
+bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8)
+{
+    return MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
+                       Widen(title_utf8 ? title_utf8 : "CorridorKey AE").c_str(),
+                       MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
+}
+
+void CK_OpenInEditor(const std::string& file_utf8)
+{
+    ShellExecuteW(NULL, L"open", L"notepad.exe",
+                  (L"\"" + Widen(file_utf8) + L"\"").c_str(), NULL, SW_SHOWNORMAL);
+}
+
+void CK_OpenFolder(const std::string& dir_utf8)
+{
+    ShellExecuteW(NULL, L"open", Widen(dir_utf8).c_str(), NULL, NULL, SW_SHOWNORMAL);
+}
+
+std::string CK_FromUtf16(const unsigned short* s)
+{
+    if (!s) return std::string();
+    return Narrow(std::wstring(reinterpret_cast<const wchar_t*>(s)));
 }
