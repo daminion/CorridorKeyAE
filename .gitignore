@@ -1,0 +1,9 @@
+.vs/
+x64/
+Debug/
+Release/
+*.aex
+*.obj
+*.pdb
+*.ilk
+*.user

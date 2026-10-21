@@ -1,0 +1,29 @@
+#pragma once
+
+typedef enum {
+    StrID_NONE,
+    StrID_Name,
+    StrID_Description,
+    StrID_KeyClip_Name,
+    StrID_KeyClip_Button,
+    StrID_OutputMode_Name,
+    StrID_OutputMode_Choices,
+    StrID_Despill_Name,
+    StrID_MatteChoke_Name,
+    StrID_MatteGamma_Name,
+    StrID_KeySettings_Name,
+    StrID_HintMask_Name,
+    StrID_HintQuality_Name,
+    StrID_LowVRAM_Name,
+    StrID_Cache_Name,
+    StrID_ChooseCache_Name,
+    StrID_ChooseCache_Button,
+    StrID_ResetCache_Name,
+    StrID_ResetCache_Button,
+    StrID_EditSettings_Name,
+    StrID_EditSettings_Button,
+    StrID_EffectData_Name,
+    StrID_Err_LoadSuite,
+    StrID_Err_FreeSuite,
+    StrID_NUMTYPES
+} StrIDType;
