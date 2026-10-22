@@ -13,6 +13,8 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_KeyClip_Button,        "Key Clip",
     StrID_OutputMode_Name,       "Output",
     StrID_OutputMode_Choices,    "Cutout|Alpha|Foreground|Checker|Original",
+    StrID_WorkingSpace_Name,     "Working Space",
+    StrID_WorkingSpace_Choices,  "sRGB (not linearized)|Linear",
     StrID_Despill_Name,          "Despill",
     StrID_MatteChoke_Name,       "Matte Choke",
     StrID_MatteGamma_Name,       "Matte Gamma",

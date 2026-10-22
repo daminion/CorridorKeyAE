@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 2
+#define MINOR_VERSION 3
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -37,10 +37,11 @@ typedef struct CK_EffectData
     char job_dir[CK_PATH_MAX];          // UTF-8 folder of the current key job
     A_long frames_total;                // expected frame count of that job
     A_long generation;                  // bumps when a job starts/finishes (forces re-render)
-    A_long reserved[8];
+    A_long fps_x1000;                   // source frame rate * 1000 (0 = unknown)
+    A_long reserved[7];
 } CK_EffectData;
 
-// Parameter order. Fixed from milestone 2 on: only append new params
+// Parameter order. Fixed from milestone 3 on: only append new params
 // (before CK_NUM_PARAMS) with new disk IDs.
 enum
 {
@@ -48,6 +49,7 @@ enum
     CK_KEY_CLIP,
     CK_STATUS,              // arbitrary param: draws status, holds CK_EffectData
     CK_OUTPUT_MODE,
+    CK_WORKING_SPACE,
     CK_DESPILL,
     CK_MATTE_CHOKE,
     CK_MATTE_GAMMA,
@@ -81,7 +83,16 @@ enum
     RESET_CACHE_DISK_ID,
     EDIT_SETTINGS_DISK_ID,
     STATUS_DISK_ID,
-    CACHE_END_DISK_ID
+    CACHE_END_DISK_ID,
+    WORKING_SPACE_DISK_ID
+};
+
+// Working Space popup
+enum
+{
+    CK_SPACE_SRGB = 1,      // project not linearized: encode results to sRGB
+    CK_SPACE_LINEAR,        // linearized project: pass scene-linear values
+    CK_SPACE_NUM = CK_SPACE_LINEAR
 };
 
 // Output popup (1-based, as AE stores popups)
@@ -100,6 +111,7 @@ enum
 
 // Shared between CorridorKeyAE.cpp and CorridorKeyAE_UI.cpp
 bool CK_ReadEffectData(PF_InData* in_data, PF_ParamDef* params[], CK_EffectData* out);
+PF_Err CK_WriteEffectData(PF_InData* in_data, PF_ParamDef* params[], const CK_EffectData& data);
 
 PF_Err CK_HandleEvent(PF_InData* in_data,
                       PF_OutData* out_data,

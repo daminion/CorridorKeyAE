@@ -1,12 +1,18 @@
 // CorridorKey AE - After Effects wrapper for CorridorKey 2.0
 //
-// Milestone 2: Key Clip runs CorridorKey in the background into the cache
-// folder and the Status control shows progress. Render is still a
-// pass-through; reading the cached EXRs is milestone 3.
+// Key Clip runs CorridorKey in the background into the cache folder, the
+// Status control shows progress, and the render draws the cached EXRs with
+// the live controls (Output, Working Space, Despill, Matte Choke/Gamma).
 
 #include "CorridorKeyAE.h"
+#include "AE_EffectSuites.h"
 #include "CK_Platform.h"
 #include "CK_Job.h"
+#include "CK_Frames.h"
+#include "CK_Render.h"
+
+#include <cmath>
+#include <vector>
 
 #include <cstring>
 #include <cstdio>
@@ -258,6 +264,14 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                   OUTPUT_MODE_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_WorkingSpace_Name),
+                  CK_SPACE_NUM,
+                  CK_SPACE_SRGB,
+                  STR(StrID_WorkingSpace_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  WORKING_SPACE_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX(STR(StrID_Despill_Name),
                          0, 100, 0, 100, 50,
                          PF_Precision_TENTHS,
@@ -374,8 +388,8 @@ bool CK_ReadEffectData(PF_InData* in_data, PF_ParamDef* params[], CK_EffectData*
     return true;
 }
 
-static PF_Err WriteEffectData(PF_InData* in_data, PF_ParamDef* params[],
-                              const CK_EffectData& data)
+PF_Err CK_WriteEffectData(PF_InData* in_data, PF_ParamDef* params[],
+                          const CK_EffectData& data)
 {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
     PF_ArbitraryH h = params[CK_STATUS]->u.arb_d.value;
@@ -538,7 +552,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
             {
                 CK_CancelJob(data.job_dir);
                 data.generation++;
-                err = WriteEffectData(in_data, params, data);
+                err = CK_WriteEffectData(in_data, params, data);
             }
             return err;
         }
@@ -594,8 +608,9 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
 
     SetPathField(data.job_dir, job_dir);
     data.frames_total = req.frames_total;
+    data.fps_x1000 = (A_long)(req.fps * 1000.0 + 0.5);
     data.generation++;
-    err = WriteEffectData(in_data, params, data);
+    err = CK_WriteEffectData(in_data, params, data);
     out_data->out_flags |= PF_OutFlag_REFRESH_UI;
     return err;
 }
@@ -622,7 +637,7 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
             if (CK_ChooseFolder(current, chosen))
             {
                 SetPathField(data.cache_override, chosen);
-                err = WriteEffectData(in_data, params, data);
+                err = CK_WriteEffectData(in_data, params, data);
                 if (!err)
                     CK_ShowMessage("CorridorKey AE",
                                    "This effect will cache new keys to:\n  " + chosen);
@@ -635,7 +650,7 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
             CK_EffectData data;
             CK_ReadEffectData(in_data, params, &data);
             SetPathField(data.cache_override, std::string());
-            err = WriteEffectData(in_data, params, data);
+            err = CK_WriteEffectData(in_data, params, data);
             if (!err)
             {
                 CK_GlobalSettings gs = CK_LoadGlobalSettings();
@@ -658,8 +673,19 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
 }
 
 // ---------------------------------------------------------------------------
-// SmartFX render (pass-through until milestone 3)
+// SmartFX render: cached key with live controls, else pass-through
 // ---------------------------------------------------------------------------
+
+struct CK_PreRenderData
+{
+    A_long left = 0;
+    A_long top = 0;
+};
+
+static void DeletePreRenderData(void* p)
+{
+    delete reinterpret_cast<CK_PreRenderData*>(p);
+}
 
 static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                         PF_PreRenderExtra* extra)
@@ -680,8 +706,74 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
     {
         extra->output->result_rect = in_result.result_rect;
         extra->output->max_result_rect = in_result.max_result_rect;
+
+        CK_PreRenderData* prd = new CK_PreRenderData;
+        prd->left = in_result.result_rect.left;
+        prd->top = in_result.result_rect.top;
+        extra->output->pre_render_data = prd;
+        extra->output->delete_pre_render_data_func = DeletePreRenderData;
     }
     return err;
+}
+
+// Straight-alpha float RGBA buffer -> AE world in its own bit depth.
+static void WriteToWorld(const std::vector<float>& buf, PF_EffectWorld* w,
+                         PF_PixelFormat fmt)
+{
+    for (A_long y = 0; y < w->height; ++y)
+    {
+        const float* src = &buf[(size_t)y * w->width * 4];
+        char* row = reinterpret_cast<char*>(w->data) + (size_t)y * w->rowbytes;
+
+        for (A_long x = 0; x < w->width; ++x, src += 4)
+        {
+            switch (fmt)
+            {
+                case PF_PixelFormat_ARGB128:
+                {
+                    PF_PixelFloat* p = reinterpret_cast<PF_PixelFloat*>(row) + x;
+                    p->red = src[0];
+                    p->green = src[1];
+                    p->blue = src[2];
+                    p->alpha = src[3];
+                    break;
+                }
+                case PF_PixelFormat_ARGB64:
+                {
+                    PF_Pixel16* p = reinterpret_cast<PF_Pixel16*>(row) + x;
+                    auto q = [](float v) {
+                        v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+                        return (A_u_short)(v * PF_MAX_CHAN16 + 0.5f);
+                    };
+                    p->red = q(src[0]);
+                    p->green = q(src[1]);
+                    p->blue = q(src[2]);
+                    p->alpha = q(src[3]);
+                    break;
+                }
+                default:
+                {
+                    PF_Pixel8* p = reinterpret_cast<PF_Pixel8*>(row) + x;
+                    auto q = [](float v) {
+                        v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+                        return (A_u_char)(v * PF_MAX_CHAN8 + 0.5f);
+                    };
+                    p->red = q(src[0]);
+                    p->green = q(src[1]);
+                    p->blue = q(src[2]);
+                    p->alpha = q(src[3]);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+static bool ReadEffectDataFromParam(PF_InData* in_data, PF_ParamDef& p, CK_EffectData* out)
+{
+    PF_ParamDef* params[CK_NUM_PARAMS] = { 0 };
+    params[CK_STATUS] = &p;
+    return CK_ReadEffectData(in_data, params, out);
 }
 
 static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
@@ -696,12 +788,84 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
     ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, CK_INPUT, &inW));
     ERR(extra->cb->checkout_output(in_data->effect_ref, &outW));
 
-    if (!err && inW && outW)
+    PF_ParamDef p_mode, p_space, p_despill, p_choke, p_gamma, p_status;
+    AEFX_CLR_STRUCT(p_mode);
+    AEFX_CLR_STRUCT(p_space);
+    AEFX_CLR_STRUCT(p_despill);
+    AEFX_CLR_STRUCT(p_choke);
+    AEFX_CLR_STRUCT(p_gamma);
+    AEFX_CLR_STRUCT(p_status);
+
+    const A_long t = in_data->current_time, ts = in_data->time_step, sc = in_data->time_scale;
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_OUTPUT_MODE, t, ts, sc, &p_mode));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_WORKING_SPACE, t, ts, sc, &p_space));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_DESPILL, t, ts, sc, &p_despill));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_MATTE_CHOKE, t, ts, sc, &p_choke));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_MATTE_GAMMA, t, ts, sc, &p_gamma));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_STATUS, t, ts, sc, &p_status));
+
+    bool drew = false;
+
+    if (!err && inW && outW && p_mode.u.pd.value != CK_OUT_ORIGINAL)
     {
-        ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref,
-                                                inW, outW, NULL, NULL));
+        CK_EffectData data;
+        if (ReadEffectDataFromParam(in_data, p_status, &data) && data.job_dir[0])
+        {
+            double fps = data.fps_x1000 > 0 ? data.fps_x1000 / 1000.0
+                       : (ts > 0 ? (double)sc / (double)ts : 24.0);
+            int index = (int)std::floor((double)t / (double)sc * fps + 1e-3);
+
+            std::shared_ptr<const CK_Frame> frame =
+                CK_GetKeyedFrame(data.job_dir, index, data.generation);
+
+            if (frame)
+            {
+                CK_RenderSettings s;
+                s.mode = p_mode.u.pd.value;
+                s.srgb_out = p_space.u.pd.value != CK_SPACE_LINEAR;
+                s.despill = (float)(p_despill.u.fs_d.value / 100.0);
+                s.choke_px = (float)p_choke.u.fs_d.value;
+                s.gamma = (float)p_gamma.u.fs_d.value;
+
+                const CK_PreRenderData* prd =
+                    reinterpret_cast<const CK_PreRenderData*>(extra->input->pre_render_data);
+                s.origin_x = prd ? prd->left : 0;
+                s.origin_y = prd ? prd->top : 0;
+                s.scale_x = in_data->downsample_x.num
+                                ? (float)in_data->downsample_x.den / (float)in_data->downsample_x.num
+                                : 1.0f;
+                s.scale_y = in_data->downsample_y.num
+                                ? (float)in_data->downsample_y.den / (float)in_data->downsample_y.num
+                                : 1.0f;
+
+                std::vector<float> buf((size_t)outW->width * outW->height * 4);
+                CK_RenderKey(*frame, s, outW->width, outW->height, buf.data());
+
+                PF_PixelFormat fmt = PF_PixelFormat_ARGB32;
+                AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data,
+                                                             kPFWorldSuite,
+                                                             kPFWorldSuiteVersion2,
+                                                             out_data);
+                ERR(world_suite->PF_GetPixelFormat(outW, &fmt));
+                if (!err)
+                {
+                    WriteToWorld(buf, outW, fmt);
+                    drew = true;
+                }
+            }
+        }
     }
 
+    // Original, not keyed yet, or frame not written yet: show the plate.
+    if (!err && !drew && inW && outW)
+        ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, inW, outW, NULL, NULL));
+
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_status));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_gamma));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_choke));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_despill));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_space));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_mode));
     ERR2(extra->cb->checkin_layer_pixels(in_data->effect_ref, CK_INPUT));
     return err;
 }

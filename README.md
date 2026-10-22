@@ -10,8 +10,8 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
 ## Status
 
 - Milestone 1 (done): parameter layout, settings file, per-effect cache folder, pass-through render.
-- **Milestone 2 (testing):** Key Clip runs CorridorKey in the background (EXR alpha + fg into the cache), and the Status line shows progress. Clicking Key Clip again while it runs offers to cancel.
-- Milestone 3: render the cached result (Output, Despill, Matte Choke, Matte Gamma).
+- Milestone 2 (done): Key Clip runs CorridorKey in the background (EXR alpha + fg into the cache), and the Status line shows progress. Clicking Key Clip again while it runs offers to cancel.
+- **Milestone 3 (testing):** the effect renders the cached key with live Output, Working Space, Despill, Matte Choke and Matte Gamma.
 - Milestone 4: Hint Mask → first-frame hint.
 
 Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it.
@@ -44,3 +44,7 @@ Global: `%APPDATA%\CorridorKeyAE\settings.ini`. It's created on first use; open 
 Per effect: **Cache > Cache Folder > Choose...** overrides the cache folder for that one effect and is saved with the project. **Reset** goes back to the global default.
 
 Branches: `dev` is active development. Backup branches are `backup/<name>`.
+
+## Third-party code
+
+- [tinyexr](https://github.com/syoyo/tinyexr) (BSD 3-Clause) and [miniz](https://github.com/richgel999/miniz) (MIT) in `third_party/`, used to read the cached EXRs. Licenses are next to the sources.

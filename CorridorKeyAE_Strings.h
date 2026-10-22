@@ -8,6 +8,8 @@ typedef enum {
     StrID_KeyClip_Button,
     StrID_OutputMode_Name,
     StrID_OutputMode_Choices,
+    StrID_WorkingSpace_Name,
+    StrID_WorkingSpace_Choices,
     StrID_Despill_Name,
     StrID_MatteChoke_Name,
     StrID_MatteGamma_Name,

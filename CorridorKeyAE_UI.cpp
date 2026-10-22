@@ -149,16 +149,34 @@ static PF_Err IdleStatus(PF_InData* in_data,
     StatusInfo info = GetStatus(in_data, params);
 
     bool changed = false;
+    bool just_finished = false;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         auto it = g_last_drawn.find(info.key);
         changed = (it == g_last_drawn.end() || it->second != info.text);
+        just_finished = it != g_last_drawn.end() &&
+                        it->second.compare(0, 6, "Keying") == 0 &&
+                        info.state == CK_JOB_DONE;
+    }
+
+    PF_Err err = PF_Err_NONE;
+
+    // The key just finished: bump the generation so AE drops any frames it
+    // rendered (as the plain plate) while the cache was still filling.
+    if (just_finished)
+    {
+        CK_EffectData data;
+        if (CK_ReadEffectData(in_data, params, &data))
+        {
+            data.generation++;
+            err = CK_WriteEffectData(in_data, params, data);
+        }
     }
 
     if (changed)
         extra->evt_out_flags |= PF_EO_UPDATE_NOW;
 
-    return PF_Err_NONE;
+    return err;
 }
 
 PF_Err CK_HandleEvent(PF_InData* in_data,

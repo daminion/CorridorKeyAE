@@ -55,6 +55,9 @@ bool CK_LaunchHidden(const std::string& cmd_line_utf8,
 bool CK_ProcessAlive(unsigned long pid);
 void CK_KillProcessTree(unsigned long pid);
 
+// Full path of the first subfolder of dir whose name ends with suffix ("" if none).
+std::string CK_FindSubdir(const std::string& dir_utf8, const char* suffix);
+
 // Counts *.exr in the first subfolder of dir whose name ends with suffix.
 int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix);
 

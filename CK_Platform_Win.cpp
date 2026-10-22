@@ -326,13 +326,13 @@ void CK_KillProcessTree(unsigned long pid)
     }
 }
 
-int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix)
+std::string CK_FindSubdir(const std::string& dir_utf8, const char* suffix)
 {
     std::wstring dir = Widen(dir_utf8);
     std::wstring suf = Widen(suffix ? suffix : "");
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return 0;
+    if (h == INVALID_HANDLE_VALUE) return std::string();
 
     std::wstring sub;
     do
@@ -347,10 +347,18 @@ int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix)
         }
     } while (FindNextFileW(h, &fd));
     FindClose(h);
-    if (sub.empty()) return 0;
+    return Narrow(sub);
+}
 
+int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix)
+{
+    std::string sub_utf8 = CK_FindSubdir(dir_utf8, suffix);
+    if (sub_utf8.empty()) return 0;
+    std::wstring sub = Widen(sub_utf8);
+
+    WIN32_FIND_DATAW fd;
     int count = 0;
-    h = FindFirstFileW((sub + L"\\*.exr").c_str(), &fd);
+    HANDLE h = FindFirstFileW((sub + L"\\*.exr").c_str(), &fd);
     if (h == INVALID_HANDLE_VALUE) return 0;
     do
     {
