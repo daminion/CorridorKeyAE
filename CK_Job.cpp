@@ -69,6 +69,56 @@ namespace
     };
     std::mutex g_mutex;
     std::map<std::string, Cached> g_cache;
+
+    std::mutex g_track_mutex;
+    std::map<std::string, std::string> g_tracked;   // job_dir -> last reported signature
+
+    std::string Signature(const CK_JobStatus& st)
+    {
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "%d:%d", (int)st.state, st.frames_done);
+        return buf;
+    }
+}
+
+void CK_TrackJob(const std::string& job_dir)
+{
+    if (job_dir.empty())
+        return;
+    std::lock_guard<std::mutex> lock(g_track_mutex);
+    g_tracked.emplace(job_dir, std::string());
+}
+
+bool CK_PollTrackedJobs()
+{
+    std::vector<std::string> dirs;
+    {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
+        for (auto& kv : g_tracked)
+            dirs.push_back(kv.first);
+    }
+
+    bool changed = false;
+    for (const std::string& dir : dirs)
+    {
+        CK_JobStatus st = CK_QueryJob(dir);
+        std::string sig = Signature(st);
+
+        std::lock_guard<std::mutex> lock(g_track_mutex);
+        auto it = g_tracked.find(dir);
+        if (it == g_tracked.end())
+            continue;
+        if (it->second != sig)
+        {
+            it->second = sig;
+            changed = true;
+        }
+        else if (st.state != CK_JOB_RUNNING)
+        {
+            g_tracked.erase(it);   // final state already reported
+        }
+    }
+    return changed;
 }
 
 std::string CK_JobLogPath(const std::string& job_dir)
@@ -268,8 +318,11 @@ bool CK_StartJob(const std::string& job_dir,
     std::snprintf(num, sizeof(num), "%lu", pid);
     CK_WriteTextFile(job_dir + "\\pid.txt", num);
 
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_cache.erase(job_dir);
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_cache.erase(job_dir);
+    }
+    CK_TrackJob(job_dir);
     return true;
 }
 

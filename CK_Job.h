@@ -68,5 +68,14 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir);
 
 std::string CK_JobLogPath(const std::string& job_dir);
 
+// Jobs whose progress the UI should follow. A job is tracked when it starts
+// or when its Status line is drawn while running.
+void CK_TrackJob(const std::string& job_dir);
+
+// Re-checks tracked jobs. True if any job's state or frame count changed
+// since the last poll (time to refresh the panels). Finished jobs drop off
+// after their final change has been reported.
+bool CK_PollTrackedJobs();
+
 // One-line text for the Status control.
 std::string CK_StatusText(const CK_JobStatus& st, int frames_total);

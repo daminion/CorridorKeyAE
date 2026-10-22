@@ -212,6 +212,61 @@ static PF_Err About(PF_InData* in_data, PF_OutData* out_data,
     return PF_Err_NONE;
 }
 
+// ---------------------------------------------------------------------------
+// Background refresh: AE only sends idle events to the Effect Controls panel
+// while you interact with it, so an AEGP idle hook polls running keys and
+// refreshes the panels when their progress changes.
+// ---------------------------------------------------------------------------
+
+static SPBasicSuite* S_basic = NULL;
+static AEGP_PluginID S_plugin_id = 0;
+static bool S_idle_registered = false;
+
+static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL)
+{
+    static unsigned long last = 0;
+    if (max_sleepPL)
+        *max_sleepPL = 500;
+
+    const unsigned long now = CK_TickMs();
+    if (now - last < 750)
+        return A_Err_NONE;
+    last = now;
+
+    if (CK_PollTrackedJobs() && S_basic)
+    {
+        try
+        {
+            AEGP_SuiteHandler suites(S_basic);
+            suites.AdvAppSuite2()->PF_RefreshAllWindows();
+        }
+        catch (...)
+        {
+        }
+    }
+    return A_Err_NONE;
+}
+
+static void RegisterIdleHook(PF_InData* in_data)
+{
+    if (S_idle_registered)
+        return;
+    try
+    {
+        AEGP_SuiteHandler suites(in_data->pica_basicP);
+        S_basic = in_data->pica_basicP;
+        if (!suites.UtilitySuite6()->AEGP_RegisterWithAEGP(NULL, CK_MATCH_NAME, &S_plugin_id) &&
+            !suites.RegisterSuite5()->AEGP_RegisterIdleHook(S_plugin_id, CK_IdleHook, NULL))
+        {
+            S_idle_registered = true;
+        }
+    }
+    catch (...)
+    {
+        // No hook: the Status line still updates when the panel is touched.
+    }
+}
+
 static PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data,
                           PF_ParamDef* params[], PF_LayerDef* output)
 {
@@ -226,7 +281,10 @@ static PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data,
                             PF_OutFlag_CUSTOM_UI;
     out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_SMART_RENDER |
                             PF_OutFlag2_FLOAT_COLOR_AWARE |
+                            PF_OutFlag2_I_MIX_GUID_DEPENDENCIES |
                             PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+
+    RegisterIdleHook(in_data);
     return PF_Err_NONE;
 }
 
@@ -972,6 +1030,23 @@ static void DeletePreRenderData(void* p)
     delete reinterpret_cast<CK_PreRenderData*>(p);
 }
 
+static bool ReadEffectDataFromParam(PF_InData* in_data, PF_ParamDef& p, CK_EffectData* out)
+{
+    PF_ParamDef* params[CK_NUM_PARAMS] = { 0 };
+    params[CK_STATUS] = &p;
+    return CK_ReadEffectData(in_data, params, out);
+}
+
+// Source frame index (in cache numbering) for the current render time.
+static int CacheIndexFor(PF_InData* in_data, const CK_EffectData& data)
+{
+    const A_long ts = in_data->time_step, sc = in_data->time_scale;
+    double fps = data.fps_x1000 > 0 ? data.fps_x1000 / 1000.0
+               : (ts > 0 ? (double)sc / (double)ts : 24.0);
+    return (int)std::floor((double)in_data->current_time / (double)sc * fps + 1e-3)
+           - data.src_start;
+}
+
 static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                         PF_PreRenderExtra* extra)
 {
@@ -997,6 +1072,40 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
         prd->top = in_result.result_rect.top;
         extra->output->pre_render_data = prd;
         extra->output->delete_pre_render_data_func = DeletePreRenderData;
+    }
+
+    // Tell AE which version of this frame it's getting, so frames that were
+    // drawn as the plain plate while keying are redrawn once they're cached.
+    PF_ParamDef p_status;
+    AEFX_CLR_STRUCT(p_status);
+    if (!err && !PF_CHECKOUT_PARAM(in_data, CK_STATUS, in_data->current_time,
+                                   in_data->time_step, in_data->time_scale, &p_status))
+    {
+        CK_EffectData data;
+        if (ReadEffectDataFromParam(in_data, p_status, &data))
+        {
+            struct
+            {
+                char job[CK_PATH_MAX];
+                A_long generation;
+                A_long available;
+            } mix;
+            std::memset(&mix, 0, sizeof(mix));
+            std::memcpy(mix.job, data.job_dir, CK_PATH_MAX);
+            mix.generation = data.generation;
+
+            if (data.job_dir[0])
+            {
+                const int index = CacheIndexFor(in_data, data);
+                CK_JobStatus st = CK_QueryJob(data.job_dir);
+                // While running, the newest file may still be mid-write.
+                mix.available = (st.state == CK_JOB_DONE) ||
+                                (st.state == CK_JOB_RUNNING && index >= 0 &&
+                                 index < st.frames_done - 1);
+            }
+            ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(mix), &mix));
+        }
+        PF_CHECKIN_PARAM(in_data, &p_status);
     }
     return err;
 }
@@ -1054,13 +1163,6 @@ static void WriteToWorld(const std::vector<float>& buf, PF_EffectWorld* w,
     }
 }
 
-static bool ReadEffectDataFromParam(PF_InData* in_data, PF_ParamDef& p, CK_EffectData* out)
-{
-    PF_ParamDef* params[CK_NUM_PARAMS] = { 0 };
-    params[CK_STATUS] = &p;
-    return CK_ReadEffectData(in_data, params, out);
-}
-
 static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
                           PF_SmartRenderExtra* extra)
 {
@@ -1096,9 +1198,7 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
         CK_EffectData data;
         if (ReadEffectDataFromParam(in_data, p_status, &data) && data.job_dir[0])
         {
-            double fps = data.fps_x1000 > 0 ? data.fps_x1000 / 1000.0
-                       : (ts > 0 ? (double)sc / (double)ts : 24.0);
-            int index = (int)std::floor((double)t / (double)sc * fps + 1e-3) - data.src_start;
+            const int index = CacheIndexFor(in_data, data);
 
             std::shared_ptr<const CK_Frame> frame =
                 CK_GetKeyedFrame(data.job_dir, index, data.generation);

@@ -132,6 +132,8 @@ static PF_Err DrawStatus(PF_InData* in_data,
         std::lock_guard<std::mutex> lock(g_mutex);
         g_last_drawn[info.key] = info.text;
     }
+    if (info.state == CK_JOB_RUNNING)
+        CK_TrackJob(info.key);   // e.g. a project reopened while a key runs
 
     extra->evt_out_flags = PF_EO_HANDLED_EVENT;
     return err;

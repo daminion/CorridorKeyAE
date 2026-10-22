@@ -40,7 +40,7 @@ resource 'PiPL' (16000) {
 		},
 		/* [8] */
 		AE_Effect_Version {
-			196608	/* 0.6 */
+			229376	/* 0.7 */
 		},
 		/* [9] */
 		AE_Effect_Info_Flags {
@@ -51,7 +51,7 @@ resource 'PiPL' (16000) {
 			33587200	/* DEEP_COLOR_AWARE + CUSTOM_UI */
 		},
 		AE_Effect_Global_OutFlags_2 {
-			134222848	/* THREADED_RENDERING + FLOAT_COLOR_AWARE + SMART_RENDER */
+			135271424	/* THREADED_RENDERING + I_MIX_GUID_DEPENDENCIES + FLOAT_COLOR_AWARE + SMART_RENDER */
 		},
 		/* [11] */
 		AE_Reserved_Info {
