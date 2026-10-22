@@ -371,6 +371,24 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(HINTL_END_DISK_ID);
 
+    // --- Key Range (v0.6, appended) -----------------------------------------
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPIC(STR(StrID_RangeGroup_Name), RANGE_START_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_KeyRange_Name),
+                  CK_RANGE_NUM,
+                  CK_RANGE_LAYER,
+                  STR(StrID_KeyRange_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  KEY_RANGE_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER(STR(StrID_Handles_Name), 0, 200, 0, 48, 8, HANDLES_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(RANGE_END_DISK_ID);
+
     if (!err)
     {
         PF_CustomUIInfo ci;
@@ -543,6 +561,53 @@ static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& 
 }
 
 // ---------------------------------------------------------------------------
+// Key Range: limit the key to the layer's in/out (+ handles)
+// ---------------------------------------------------------------------------
+
+// Narrows req to the layer's trimmed range. req.frames_total must hold the
+// whole clip's length. Leaves req untouched for Whole Clip, time-stretched
+// layers, or when the range already covers the clip.
+static void ApplyKeyRange(PF_InData* in_data, PF_ParamDef* params[], CK_JobRequest& req)
+{
+    if (params[CK_KEY_RANGE]->u.pd.value == CK_RANGE_WHOLE || req.frames_total <= 0)
+        return;
+
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    PF_Err err = PF_Err_NONE;
+    AEGP_LayerH layerH = NULL;
+    A_Ratio stretch = { 1, 1 };
+    A_Time in_t, dur_t;
+    AEFX_CLR_STRUCT(in_t);
+    AEFX_CLR_STRUCT(dur_t);
+
+    ERR(suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layerH));
+    ERR(suites.LayerSuite9()->AEGP_GetLayerStretch(layerH, &stretch));
+    ERR(suites.LayerSuite9()->AEGP_GetLayerInPoint(layerH, AEGP_LTimeMode_LayerTime, &in_t));
+    ERR(suites.LayerSuite9()->AEGP_GetLayerDuration(layerH, AEGP_LTimeMode_LayerTime, &dur_t));
+
+    if (err || !in_t.scale || !dur_t.scale)
+        return;
+    if (stretch.num != stretch.den)
+        return;   // stretched layers: layer time isn't source time, key everything
+
+    const double in_s = (double)in_t.value / in_t.scale;
+    const double out_s = in_s + (double)dur_t.value / dur_t.scale;
+    int first = (int)std::floor(in_s * req.fps + 1e-3);
+    int end = (int)std::ceil(out_s * req.fps - 1e-3);
+
+    const int handles = std::max(0, (int)params[CK_HANDLES]->u.sd.value);
+    first = std::max(0, first - handles);
+    end = std::min(req.frames_total, end + handles);
+
+    if (end - first <= 0 || (first == 0 && end >= req.frames_total))
+        return;
+
+    req.trimmed = true;
+    req.start_frame = first;
+    req.frames_total = end - first;
+}
+
+// ---------------------------------------------------------------------------
 // Hint Mask -> first-frame hint PNG
 // ---------------------------------------------------------------------------
 
@@ -567,8 +632,10 @@ static bool BuildHint(PF_InData* in_data, PF_ParamDef* params[],
     std::vector<CK_MaskVertex> verts;
     PF_Boolean openB = FALSE;
 
-    // Layer time 0 = the first frame of the source, which is what CorridorKey hints.
-    ERR(suites.PathQuerySuite1()->PF_CheckoutPath(in_data->effect_ref, path_id, 0,
+    // CorridorKey hints the first frame it keys: source frame start_frame,
+    // which is layer time start_frame / fps.
+    const A_long hint_t = (A_long)((double)req.start_frame * in_data->time_scale / req.fps + 0.5);
+    ERR(suites.PathQuerySuite1()->PF_CheckoutPath(in_data->effect_ref, path_id, hint_t,
                                                   in_data->time_step, in_data->time_scale,
                                                   &pathP));
     if (!err && pathP)
@@ -608,8 +675,9 @@ static bool BuildHint(PF_InData* in_data, PF_ParamDef* params[],
         filled += c > 127;
     if (filled == 0)
     {
-        error = "The Hint Mask doesn't cover any of the first frame.\n\n"
-                "Check it surrounds the subject at the start of the clip.";
+        error = "The Hint Mask doesn't cover any of the first keyed frame.\n\n"
+                "Check it surrounds the subject at the layer's in-point\n"
+                "(minus Handles), or at the start of the clip for Whole Clip.";
         return false;
     }
 
@@ -648,7 +716,7 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
 
     for (int i = 0; i < count; ++i)
     {
-        const A_long t = (A_long)((double)i * in_data->time_scale / req.fps + 0.5);
+        const A_long t = (A_long)((double)(req.start_frame + i) * in_data->time_scale / req.fps + 0.5);
 
         PF_ParamDef p;
         AEFX_CLR_STRUCT(p);
@@ -692,7 +760,7 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
 
         if (i == 0 && empty)
         {
-            error = "The Matte Layer has no matte at the first frame of the clip.\n\n"
+            error = "The Matte Layer has no matte at the first keyed frame.\n\n"
                     "Pick a layer under Hint Layer > Matte Layer (its alpha, or white = subject),\n"
                     "or set Hint Layer > Use to Off.";
             return false;
@@ -772,6 +840,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     }
     req.hint_quality = (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0);
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
+    ApplyKeyRange(in_data, params, req);
 
     // Hint Layer takes priority over the Hint Mask when it's switched on.
     const A_long hl_use = params[CK_HINT_LAYER_USE]->u.pd.value;
@@ -814,7 +883,8 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     {
         // Just relink to the existing result.
     }
-    else if (!CK_StartJob(job_dir, req, python, gs.corridorkey_dir, error))
+    else if (!CK_StartJob(job_dir, req, python, gs.corridorkey_dir,
+                          CK_ResolveFfmpegExe(gs), error))
     {
         CK_ShowMessage(title, error);
         return err;
@@ -823,6 +893,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     SetPathField(data.job_dir, job_dir);
     data.frames_total = req.frames_total;
     data.fps_x1000 = (A_long)(req.fps * 1000.0 + 0.5);
+    data.src_start = req.trimmed ? req.start_frame : 0;
     data.generation++;
     err = CK_WriteEffectData(in_data, params, data);
     out_data->out_flags |= PF_OutFlag_REFRESH_UI;
@@ -1027,7 +1098,7 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
         {
             double fps = data.fps_x1000 > 0 ? data.fps_x1000 / 1000.0
                        : (ts > 0 ? (double)sc / (double)ts : 24.0);
-            int index = (int)std::floor((double)t / (double)sc * fps + 1e-3);
+            int index = (int)std::floor((double)t / (double)sc * fps + 1e-3) - data.src_start;
 
             std::shared_ptr<const CK_Frame> frame =
                 CK_GetKeyedFrame(data.job_dir, index, data.generation);

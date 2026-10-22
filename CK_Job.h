@@ -11,6 +11,7 @@
 //   source.txt   the source path, for reference
 //   hint_frame0.png  first-frame hint (Hint Mask, or Hint Layer > First Frame)
 //   hint_frames\hint_000000.png ...  per-frame hint (Hint Layer > Every Frame)
+//   frames\ ...   trimmed source frames (removed when the key finishes)
 
 #include <string>
 #include <vector>
@@ -20,7 +21,9 @@ struct CK_JobRequest
     std::string source_path;     // movie file, or first frame of a sequence
     bool        is_sequence = false;
     double      fps = 24.0;
-    int         frames_total = 0;
+    int         frames_total = 0;    // frames to key (after trimming)
+    bool        trimmed = false;     // key only start_frame .. start_frame + frames_total - 1
+    int         start_frame = 0;     // first source frame keyed
     float       hint_quality = 0.95f;
     bool        low_vram = false;
     int         width = 0;           // source resolution
@@ -49,11 +52,13 @@ struct CK_JobStatus
 // settings that change the result, so changed settings get a fresh folder.
 std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req);
 
-// Starts infer.py in the background. On failure returns false and sets error.
+// Starts infer.py in the background (after trimming, if requested).
+// On failure returns false and sets error.
 bool CK_StartJob(const std::string& job_dir,
                  const CK_JobRequest& req,
                  const std::string& python_exe,
                  const std::string& corridorkey_dir,
+                 const std::string& ffmpeg_exe,
                  std::string& error);
 
 void CK_CancelJob(const std::string& job_dir);

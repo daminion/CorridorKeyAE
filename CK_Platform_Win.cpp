@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cwchar>
+#include <cwctype>
 #include <shobjidl.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -100,7 +101,10 @@ CK_GlobalSettings CK_LoadGlobalSettings()
             "; Default cache folder for keyed results, e.g. a fast external drive.\r\n"
             "; Blank = %LOCALAPPDATA%\\CorridorKeyAE\\Cache\r\n"
             "; Each effect can override this with Cache > Cache Folder > Choose...\r\n"
-            "cache_root=\r\n";
+            "cache_root=\r\n"
+            "\r\n"
+            "; Optional. Blank = ffmpeg from PATH (used to trim movies to the layer's in/out)\r\n"
+            "ffmpeg=\r\n";
 
         HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, 0, NULL,
                                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -115,6 +119,7 @@ CK_GlobalSettings CK_LoadGlobalSettings()
     gs.cache_root      = Narrow(StripTrailingSlash(ReadIni(file, L"cache_root")));
     gs.corridorkey_dir = Narrow(StripTrailingSlash(ReadIni(file, L"corridorkey_dir")));
     gs.python_exe      = Narrow(ReadIni(file, L"python"));
+    gs.ffmpeg_exe      = Narrow(ReadIni(file, L"ffmpeg"));
     return gs;
 }
 
@@ -395,4 +400,62 @@ std::string CK_FromUtf16(const unsigned short* s)
 {
     if (!s) return std::string();
     return Narrow(std::wstring(reinterpret_cast<const wchar_t*>(s)));
+}
+
+// ---- milestone 6: trimming --------------------------------------------
+
+#include <algorithm>
+
+std::vector<std::string> CK_ListFilesWithExt(const std::string& dir_utf8, const std::string& ext)
+{
+    std::vector<std::wstring> names;
+    std::wstring wext = Widen(ext);
+    for (auto& c : wext) c = (wchar_t)towlower(c);
+
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((Widen(dir_utf8) + L"\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            std::wstring n = fd.cFileName, low = n;
+            for (auto& c : low) c = (wchar_t)towlower(c);
+            if (low.size() > wext.size() &&
+                low.compare(low.size() - wext.size(), wext.size(), wext) == 0)
+                names.push_back(n);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+
+    // Same order as CorridorKey (Python sorted(): plain code-point order).
+    std::sort(names.begin(), names.end());
+    std::vector<std::string> out;
+    for (auto& n : names)
+        out.push_back(dir_utf8 + "\\" + Narrow(n));
+    return out;
+}
+
+bool CK_LinkOrCopy(const std::string& src_utf8, const std::string& dst_utf8)
+{
+    std::wstring src = Widen(src_utf8), dst = Widen(dst_utf8);
+    DeleteFileW(dst.c_str());
+    if (CreateHardLinkW(dst.c_str(), src.c_str(), NULL))
+        return true;
+    return CopyFileW(src.c_str(), dst.c_str(), FALSE) != 0;
+}
+
+std::string CK_FindOnPath(const char* exe_name)
+{
+    wchar_t buf[MAX_PATH * 2];
+    DWORD n = SearchPathW(NULL, Widen(exe_name).c_str(), NULL, MAX_PATH * 2, buf, NULL);
+    if (n == 0 || n >= MAX_PATH * 2) return std::string();
+    return Narrow(buf);
+}
+
+std::string CK_ResolveFfmpegExe(const CK_GlobalSettings& gs)
+{
+    if (!gs.ffmpeg_exe.empty())
+        return gs.ffmpeg_exe;
+    return CK_FindOnPath("ffmpeg.exe");
 }

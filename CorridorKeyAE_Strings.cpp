@@ -34,6 +34,10 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_HintLayer_Name,        "Matte Layer",
     StrID_HintLayerUse_Name,     "Use",
     StrID_HintLayerUse_Choices,  "Off|First Frame|Every Frame",
+    StrID_RangeGroup_Name,       "Key Range",
+    StrID_KeyRange_Name,         "Range",
+    StrID_KeyRange_Choices,      "Layer In/Out|Whole Clip",
+    StrID_Handles_Name,          "Handles (frames)",
     StrID_Err_LoadSuite,         "Error loading suite.",
     StrID_Err_FreeSuite,         "Error releasing suite."
 };

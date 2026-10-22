@@ -29,6 +29,10 @@ typedef enum {
     StrID_HintLayer_Name,
     StrID_HintLayerUse_Name,
     StrID_HintLayerUse_Choices,
+    StrID_RangeGroup_Name,
+    StrID_KeyRange_Name,
+    StrID_KeyRange_Choices,
+    StrID_Handles_Name,
     StrID_Err_LoadSuite,
     StrID_Err_FreeSuite,
     StrID_NUMTYPES

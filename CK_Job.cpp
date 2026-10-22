@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <vector>
 #include <mutex>
 
 namespace
@@ -79,18 +80,31 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
 {
     std::string key = Lower(req.source_path) + "|" + CK_FileStamp(req.source_path);
     char settings[128];
-    unsigned long long frames_hash = 0;
+    std::snprintf(settings, sizeof(settings), "|q=%.3f|lv=%d|seq=%d|fps=%.4f",
+                  req.hint_quality, req.low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps);
+    key += settings;
+
+    // Optional parts are only added when used, so plain keys keep the id
+    // they had in earlier versions and existing caches stay valid.
+    if (!req.hint_png.empty())
+    {
+        std::snprintf(settings, sizeof(settings), "|hint=%016llx", Fnv1a(req.hint_png));
+        key += settings;
+    }
     if (!req.hint_frames.empty())
     {
-        frames_hash = 1469598103934665603ULL;
+        unsigned long long h = 1469598103934665603ULL;
         for (const std::string& f : req.hint_frames)
-            frames_hash = Fnv1a(f, frames_hash);
+            h = Fnv1a(f, h);
+        std::snprintf(settings, sizeof(settings), "|hv=%016llx", h);
+        key += settings;
     }
-    std::snprintf(settings, sizeof(settings),
-                  "|q=%.3f|lv=%d|seq=%d|fps=%.4f|hint=%016llx|hv=%016llx",
-                  req.hint_quality, req.low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps,
-                  req.hint_png.empty() ? 0ULL : Fnv1a(req.hint_png), frames_hash);
-    key += settings;
+    if (req.trimmed)
+    {
+        // Untrimmed keys keep the same id as before trimming existed.
+        std::snprintf(settings, sizeof(settings), "|start=%d|n=%d", req.start_frame, req.frames_total);
+        key += settings;
+    }
 
     char hex[17];
     std::snprintf(hex, sizeof(hex), "%08llx", Fnv1a(key) & 0xffffffffULL);
@@ -104,6 +118,7 @@ bool CK_StartJob(const std::string& job_dir,
                  const CK_JobRequest& req,
                  const std::string& python_exe,
                  const std::string& corridorkey_dir,
+                 const std::string& ffmpeg_exe,
                  std::string& error)
 {
     if (!CK_MakeDirs(job_dir))
@@ -146,8 +161,63 @@ bool CK_StartJob(const std::string& job_dir,
     }
 
     std::string input = req.is_sequence ? ParentDir(req.source_path) : req.source_path;
-
+    bool frame_dir = req.is_sequence;
+    std::string trim_cmd;                         // runs before infer.py
+    const std::string trim_dir = job_dir + "\\frames";
     char num[64];
+
+    if (req.trimmed)
+    {
+        if (!CK_MakeDirs(trim_dir))
+        {
+            error = "Couldn't create the trim folder:\n  " + trim_dir;
+            return false;
+        }
+
+        if (req.is_sequence)
+        {
+            // Link (or copy) just the frames in range; nothing is re-encoded.
+            std::string name = FileNamePart(req.source_path);
+            size_t dot = name.find_last_of('.');
+            std::string ext = dot == std::string::npos ? std::string() : name.substr(dot);
+            std::vector<std::string> files = CK_ListFilesWithExt(ParentDir(req.source_path), ext);
+            if ((int)files.size() < req.start_frame + req.frames_total)
+            {
+                error = "The image sequence has fewer frames than the layer's range.";
+                return false;
+            }
+            for (int i = 0; i < req.frames_total; ++i)
+            {
+                const std::string& src = files[req.start_frame + i];
+                if (!CK_LinkOrCopy(src, trim_dir + "\\" + FileNamePart(src)))
+                {
+                    error = "Couldn't link frames into:\n  " + trim_dir;
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            if (ffmpeg_exe.empty())
+            {
+                error = "ffmpeg wasn't found, so the clip can't be trimmed to the layer's in/out.\n\n"
+                        "Set Key Range > Range to Whole Clip, or set ffmpeg in Global Settings.";
+                return false;
+            }
+            // Seek half a frame early so the first decoded frame is exactly start_frame.
+            double ss = (req.start_frame - 0.5) / req.fps;
+            if (ss < 0) ss = 0;
+            std::snprintf(num, sizeof(num), " -ss %.6f", ss);
+            trim_cmd = Quote(ffmpeg_exe) + " -hide_banner -loglevel error -y" + num;
+            trim_cmd += " -i " + Quote(req.source_path);
+            std::snprintf(num, sizeof(num), " -frames:v %d", req.frames_total);
+            trim_cmd += num;
+            trim_cmd += " -pix_fmt rgb24 -start_number 0 " + Quote(trim_dir + "\\f_%06d.png");
+        }
+        input = trim_dir;
+        frame_dir = true;
+    }
+
     std::string args;
     args += " --input " + Quote(input);
     args += " --output_dir " + Quote(job_dir);
@@ -166,7 +236,7 @@ bool CK_StartJob(const std::string& job_dir,
     }
     if (req.low_vram)
         args += " --low_vram --temp_dir " + Quote(job_dir + "\\tmp");
-    if (req.is_sequence)
+    if (frame_dir)
     {
         std::snprintf(num, sizeof(num), " --frame_dir_fps %.6f", req.fps);
         args += num;
@@ -177,12 +247,16 @@ bool CK_StartJob(const std::string& job_dir,
 
     // Done/failed flags are written by cmd.exe itself, so they appear even
     // if After Effects has been closed in the meantime.
+    std::string infer = Quote(python_exe) + " " + Quote(corridorkey_dir + "\\infer.py") + args;
+
     std::string cmd;
-    cmd += "set PYTHONUNBUFFERED=1&& ";
-    cmd += Quote(python_exe) + " " + Quote(corridorkey_dir + "\\infer.py") + args;
-    cmd += " > " + Quote(CK_JobLogPath(job_dir)) + " 2>&1";
+    cmd += "set PYTHONUNBUFFERED=1&& (";
+    cmd += trim_cmd.empty() ? infer : trim_cmd + " && " + infer;
+    cmd += ") > " + Quote(CK_JobLogPath(job_dir)) + " 2>&1";
     cmd += " && (type nul > " + Quote(job_dir + "\\done.flag") + ")";
     cmd += " || (type nul > " + Quote(job_dir + "\\failed.flag") + ")";
+    if (req.trimmed)
+        cmd += " & rmdir /s /q " + Quote(trim_dir) + " 2>nul";   // drop the temporary frames
 
     unsigned long pid = 0;
     if (!CK_LaunchHidden(cmd, corridorkey_dir, &pid))

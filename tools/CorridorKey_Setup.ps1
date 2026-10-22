@@ -175,6 +175,114 @@ function Do-Cache {
     Write-Host 'Saved. Effects with their own Cache Folder override keep using theirs.' -ForegroundColor Green
 }
 
+function Get-CacheRoot {
+    $cr = Get-Setting 'cache_root'
+    if ($cr) { return $cr }
+    return (Join-Path $env:LOCALAPPDATA 'CorridorKeyAE\Cache')
+}
+
+function Get-KeyInfo([IO.DirectoryInfo]$d) {
+    $srcFile = Join-Path $d.FullName 'source.txt'
+    $source = ''
+    if (Test-Path $srcFile) { $source = (Get-Content $srcFile -TotalCount 1).Trim() }
+    $fgDir = Get-ChildItem $d.FullName -Directory -Filter '*_fg_exr' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $frames = 0
+    if ($fgDir) { $frames = @(Get-ChildItem $fgDir.FullName -Filter '*.exr' -File -ErrorAction SilentlyContinue).Count }
+    $bytes = (Get-ChildItem $d.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+    if (-not $bytes) { $bytes = 0 }
+
+    $state = 'Interrupted'
+    if (Test-Path (Join-Path $d.FullName 'done.flag')) { $state = 'Done' }
+    elseif (Test-Path (Join-Path $d.FullName 'failed.flag')) { $state = 'Failed' }
+    else {
+        $pidFile = Join-Path $d.FullName 'pid.txt'
+        if (Test-Path $pidFile) {
+            $procId = 0
+            [int]::TryParse((Get-Content $pidFile -Raw).Trim(), [ref]$procId) | Out-Null
+            if ($procId -and (Get-Process -Id $procId -ErrorAction SilentlyContinue)) { $state = 'Running' }
+        }
+    }
+
+    [pscustomobject]@{
+        Name      = $d.Name
+        Path      = $d.FullName
+        Source    = $source
+        SourceOK  = [bool]($source -and (Test-Path $source))
+        Frames    = $frames
+        Bytes     = [double]$bytes
+        Modified  = $d.LastWriteTime
+        State     = $state
+    }
+}
+
+function Parse-Selection([string]$text, [int]$max) {
+    $picked = New-Object System.Collections.Generic.List[int]
+    foreach ($part in ($text -split '[,\s]+' | Where-Object { $_ })) {
+        if ($part -match '^(\d+)-(\d+)$') {
+            for ($i = [int]$Matches[1]; $i -le [int]$Matches[2]; $i++) { if ($i -ge 1 -and $i -le $max) { $picked.Add($i) } }
+        } elseif ($part -match '^\d+$') {
+            $i = [int]$part; if ($i -ge 1 -and $i -le $max) { $picked.Add($i) }
+        }
+    }
+    return $picked | Sort-Object -Unique
+}
+
+function Do-ManageCache {
+    $root = Get-CacheRoot
+    $other = '' + (Read-Host "Cache folder to manage [$root]")
+    if ($other.Trim()) { $root = $other.Trim().Trim('"').TrimEnd('\') }
+    if (-not (Test-Path $root)) { Write-Host "No cache folder at $root" -ForegroundColor Yellow; return }
+
+    while ($true) {
+        Write-Host ''
+        Write-Host "Scanning $root ..." -ForegroundColor Cyan
+        $keys = @(Get-ChildItem $root -Directory | ForEach-Object { Get-KeyInfo $_ } |
+                  Where-Object { $_.Source -or $_.Frames -gt 0 } | Sort-Object Modified)
+        if ($keys.Count -eq 0) { Write-Host '  No cached keys.'; return }
+
+        $total = 0
+        Write-Host ''
+        Write-Host ('  {0,3}  {1,-34} {2,6} {3,9}  {4,-10} {5,-11} {6}' -f '#', 'Key', 'Frames', 'Size', 'Date', 'State', 'Source')
+        for ($i = 0; $i -lt $keys.Count; $i++) {
+            $k = $keys[$i]; $total += $k.Bytes
+            $src = if (-not $k.Source) { '?' } elseif ($k.SourceOK) { Split-Path $k.Source -Leaf } else { 'MISSING: ' + (Split-Path $k.Source -Leaf) }
+            $color = if ($k.State -eq 'Running') { 'Cyan' } elseif (-not $k.SourceOK) { 'Yellow' } else { 'Gray' }
+            Write-Host ('  {0,3}  {1,-34} {2,6} {3,7:N2} GB  {4:yyyy-MM-dd} {5,-11} {6}' -f ($i + 1), $k.Name, $k.Frames, ($k.Bytes / 1GB), $k.Modified, $k.State, $src) -ForegroundColor $color
+        }
+        Write-Host ('  Total: {0:N2} GB in {1} keys' -f ($total / 1GB), $keys.Count)
+        Write-Host ''
+        Write-Host '  Numbers (e.g. 1,3-5) = delete those    M = delete keys whose source is missing'
+        Write-Host '  O = delete keys older than N days      F = open folder    Enter = back'
+        $c = ("" + (Read-Host 'Choose')).Trim().ToUpper()
+        if (-not $c) { return }
+        if ($c -eq 'F') { Start-Process explorer.exe $root; continue }
+
+        $doomed = @()
+        if ($c -eq 'M') { $doomed = @($keys | Where-Object { $_.Source -and -not $_.SourceOK }) }
+        elseif ($c -eq 'O') {
+            $days = 0
+            if (-not [int]::TryParse(('' + (Read-Host 'Older than how many days')).Trim(), [ref]$days)) { continue }
+            $cutoff = (Get-Date).AddDays(-$days)
+            $doomed = @($keys | Where-Object { $_.Modified -lt $cutoff })
+        }
+        else { $doomed = @(Parse-Selection $c $keys.Count | ForEach-Object { $keys[$_ - 1] }) }
+
+        $running = @($doomed | Where-Object { $_.State -eq 'Running' })
+        if ($running.Count) { Write-Host "  Skipping $($running.Count) key(s) still running." -ForegroundColor Yellow }
+        $doomed = @($doomed | Where-Object { $_.State -ne 'Running' })
+        if ($doomed.Count -eq 0) { Write-Host '  Nothing to delete.'; continue }
+
+        $gb = ($doomed | Measure-Object Bytes -Sum).Sum / 1GB
+        $doomed | ForEach-Object { Write-Host "    $($_.Name)" }
+        $ok = Read-Host ('Delete these {0} key(s), {1:N2} GB? Projects using them will need Key Clip again. (y/N)' -f $doomed.Count, $gb)
+        if (('' + $ok).Trim().ToLower() -ne 'y') { continue }   # anything but an explicit y cancels
+        foreach ($k in $doomed) {
+            try { Remove-Item -LiteralPath $k.Path -Recurse -Force -ErrorAction Stop; Write-Host "  deleted $($k.Name)" -ForegroundColor Green }
+            catch { Write-Host "  couldn't delete $($k.Name): $($_.Exception.Message)" -ForegroundColor Red }
+        }
+    }
+}
+
 # ------------------------------------------------------------------- menu ---
 
 while ($true) {
@@ -187,6 +295,7 @@ while ($true) {
     Write-Host '  4  Download model weights (~5 GB)'
     Write-Host '  5  Test-key a clip outside AE'
     Write-Host '  6  Set default cache folder'
+    Write-Host '  7  Manage cached keys'
     Write-Host '  Q  Quit'
     Write-Host ''
     $c = (Read-Host 'Choose').Trim().ToUpper()
@@ -198,6 +307,7 @@ while ($true) {
             '4' { Do-Weights;  Pause-Menu }
             '5' { Do-Test;     Pause-Menu }
             '6' { Do-Cache;    Pause-Menu }
+            '7' { Do-ManageCache; Pause-Menu }
             'Q' { return }
         }
     } catch {

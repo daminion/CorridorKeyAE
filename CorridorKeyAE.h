@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 5
+#define MINOR_VERSION 6
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -38,7 +38,8 @@ typedef struct CK_EffectData
     A_long frames_total;                // expected frame count of that job
     A_long generation;                  // bumps when a job starts/finishes (forces re-render)
     A_long fps_x1000;                   // source frame rate * 1000 (0 = unknown)
-    A_long reserved[7];
+    A_long src_start;                   // source frame of cached frame 0 (trimmed keys)
+    A_long reserved[6];
 } CK_EffectData;
 
 // Parameter order. Fixed from milestone 3 on: only append new params
@@ -68,6 +69,11 @@ enum
     CK_HINT_LAYER,
     CK_HINT_LAYER_USE,
     CK_HINTL_END,
+    // v0.6 (appended)
+    CK_RANGE_START,
+    CK_KEY_RANGE,
+    CK_HANDLES,
+    CK_RANGE_END,
     CK_NUM_PARAMS
 };
 
@@ -93,7 +99,19 @@ enum
     HINTL_START_DISK_ID,
     HINT_LAYER_DISK_ID,
     HINT_LAYER_USE_DISK_ID,
-    HINTL_END_DISK_ID
+    HINTL_END_DISK_ID,
+    RANGE_START_DISK_ID,
+    KEY_RANGE_DISK_ID,
+    HANDLES_DISK_ID,
+    RANGE_END_DISK_ID
+};
+
+// Key Range popup
+enum
+{
+    CK_RANGE_LAYER = 1,     // layer in/out + handles
+    CK_RANGE_WHOLE,         // entire source clip
+    CK_RANGE_NUM = CK_RANGE_WHOLE
 };
 
 // Hint Layer > Use popup

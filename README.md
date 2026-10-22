@@ -13,9 +13,10 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
 - Milestone 2 (done): Key Clip runs CorridorKey in the background (EXR alpha + fg into the cache), and the Status line shows progress. Clicking Key Clip again while it runs offers to cancel.
 - Milestone 3 (done): the effect renders the cached key with live Output, Working Space, Despill, Matte Choke and Matte Gamma.
 - Milestone 4 (done): Hint Mask. Pick a closed mask on the layer; at Key Clip it is rasterized at the source's first frame into a hint PNG (white = subject) and passed to CorridorKey with Hint Quality as the trust level. Mask mode/invert/feather are ignored; only the shape counts.
-- **Milestone 5 (testing):** Hint Layer. Pick a Matte Layer and set Use to First Frame or Every Frame. Its alpha (or luminance, if the layer is fully opaque) is rendered at the source frame times, resized to the source resolution, and passed as `--hint_first_frame` or as a `--hint_video` frame folder. Takes priority over the Hint Mask. The layer comes in its own pixel space with effects applied (Roto Brush works); masks on that layer itself aren't included, so precompose a masked layer first.
+- Milestone 5 (done): Hint Layer. Pick a Matte Layer and set Use to First Frame or Every Frame. Its alpha (or luminance, if the layer is fully opaque) is rendered at the source frame times, resized to the source resolution, and passed as `--hint_first_frame` or as a `--hint_video` frame folder. Takes priority over the Hint Mask. The layer comes in its own pixel space with effects applied (Roto Brush works); masks on that layer itself aren't included, so precompose a masked layer first.
+- **Milestone 6 (testing):** Key Range. With Range = Layer In/Out, Key Clip keys only the layer's trimmed range plus Handles (default 8 frames each side). Movies are trimmed with ffmpeg into `frames\` in the key folder (deleted when done); sequences get just the needed frames hard-linked. Hints are read at the first keyed frame. Time-stretched layers key the whole clip; time remapping isn't supported.
 
-Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it.
+Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it. Option 7 manages cached keys: lists each key's clip, frames, size, date and state, and deletes picked keys, keys whose source is missing, or keys older than N days (running keys are never deleted).
 
 ## Layout
 

@@ -5,6 +5,7 @@
 // CK_Platform_Win.cpp; a Mac implementation can be added later.
 
 #include <string>
+#include <vector>
 
 struct CK_GlobalSettings
 {
@@ -12,6 +13,7 @@ struct CK_GlobalSettings
     std::string cache_root;       // global default cache folder (may be empty)
     std::string corridorkey_dir;  // CorridorKey2.0 repo folder (contains infer.py)
     std::string python_exe;       // python.exe; empty = <corridorkey_dir>\venv\Scripts\python.exe
+    std::string ffmpeg_exe;       // ffmpeg.exe; empty = search PATH
 };
 
 // Loads %APPDATA%\CorridorKeyAE\settings.ini, creating it with blank values
@@ -65,6 +67,19 @@ unsigned long CK_TickMs();
 bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8);
 void CK_OpenInEditor(const std::string& file_utf8);
 void CK_OpenFolder(const std::string& dir_utf8);
+
+// ---- milestone 6: trimming --------------------------------------------
+
+// Files in dir with the given extension (".exr"), sorted by name (full paths).
+std::vector<std::string> CK_ListFilesWithExt(const std::string& dir_utf8, const std::string& ext);
+
+// Hard link if possible (same drive), else copy.
+bool CK_LinkOrCopy(const std::string& src_utf8, const std::string& dst_utf8);
+
+// Full path of an executable on PATH ("" if not found).
+std::string CK_FindOnPath(const char* exe_name);
+
+std::string CK_ResolveFfmpegExe(const CK_GlobalSettings& gs);
 
 // AE hands file paths over as null-terminated UTF-16.
 std::string CK_FromUtf16(const unsigned short* s);
