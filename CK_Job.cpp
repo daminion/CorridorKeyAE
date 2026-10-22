@@ -79,9 +79,17 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
 {
     std::string key = Lower(req.source_path) + "|" + CK_FileStamp(req.source_path);
     char settings[128];
-    std::snprintf(settings, sizeof(settings), "|q=%.3f|lv=%d|seq=%d|fps=%.4f|hint=%016llx",
+    unsigned long long frames_hash = 0;
+    if (!req.hint_frames.empty())
+    {
+        frames_hash = 1469598103934665603ULL;
+        for (const std::string& f : req.hint_frames)
+            frames_hash = Fnv1a(f, frames_hash);
+    }
+    std::snprintf(settings, sizeof(settings),
+                  "|q=%.3f|lv=%d|seq=%d|fps=%.4f|hint=%016llx|hv=%016llx",
                   req.hint_quality, req.low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps,
-                  req.hint_png.empty() ? 0ULL : Fnv1a(req.hint_png));
+                  req.hint_png.empty() ? 0ULL : Fnv1a(req.hint_png), frames_hash);
     key += settings;
 
     char hex[17];
@@ -117,6 +125,26 @@ bool CK_StartJob(const std::string& job_dir,
         return false;
     }
 
+    const std::string hint_dir = job_dir + "\\hint_frames";
+    if (!req.hint_frames.empty())
+    {
+        if (!CK_MakeDirs(hint_dir))
+        {
+            error = "Couldn't create the hint folder:\n  " + hint_dir;
+            return false;
+        }
+        for (size_t i = 0; i < req.hint_frames.size(); ++i)
+        {
+            char name[48];
+            std::snprintf(name, sizeof(name), "\\hint_%06d.png", (int)i);
+            if (!CK_WriteTextFile(hint_dir + name, req.hint_frames[i]))
+            {
+                error = "Couldn't write hint frames to:\n  " + hint_dir;
+                return false;
+            }
+        }
+    }
+
     std::string input = req.is_sequence ? ParentDir(req.source_path) : req.source_path;
 
     char num[64];
@@ -124,7 +152,13 @@ bool CK_StartJob(const std::string& job_dir,
     args += " --input " + Quote(input);
     args += " --output_dir " + Quote(job_dir);
     args += " --output_format exr --exr_dtype half --outputs alpha fg";
-    if (!req.hint_png.empty())
+    if (!req.hint_frames.empty())
+    {
+        args += " --hint_video " + Quote(hint_dir);
+        std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);
+        args += num;
+    }
+    else if (!req.hint_png.empty())
     {
         args += " --hint_first_frame " + Quote(hint_path);
         std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);

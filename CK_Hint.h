@@ -22,3 +22,21 @@ void CK_RasterizeMask(const std::vector<CK_MaskVertex>& verts,
 // Encodes 8-bit grayscale pixels as PNG bytes. Empty on failure.
 std::string CK_EncodeGrayPng(const std::vector<unsigned char>& pixels,
                              int width, int height);
+
+// ---- Hint Layer --------------------------------------------------------
+
+enum CK_PixelKind
+{
+    CK_PIX_8 = 0,     // PF_Pixel8:     A,R,G,B bytes, 0..255
+    CK_PIX_16,        // PF_Pixel16:    A,R,G,B shorts, 0..32768
+    CK_PIX_32F        // PF_PixelFloat: A,R,G,B floats, 0..1
+};
+
+// Matte from an AE layer buffer, resampled (bilinear) to out_w x out_h.
+// use_luma: take luminance instead of alpha (for black/white matte layers).
+// Reports whether the source alpha was fully opaque / fully transparent.
+void CK_WorldToHint(const void* data, long rowbytes, int w, int h,
+                    CK_PixelKind kind, bool use_luma,
+                    int out_w, int out_h,
+                    std::vector<unsigned char>& out,
+                    bool* alpha_fully_opaque, bool* matte_empty);

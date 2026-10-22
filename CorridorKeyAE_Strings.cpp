@@ -30,6 +30,10 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_EditSettings_Name,     "Global Settings",
     StrID_EditSettings_Button,   "Open...",
     StrID_Status_Name,           "Status",
+    StrID_HintLayerGroup_Name,   "Hint Layer",
+    StrID_HintLayer_Name,        "Matte Layer",
+    StrID_HintLayerUse_Name,     "Use",
+    StrID_HintLayerUse_Choices,  "Off|First Frame|Every Frame",
     StrID_Err_LoadSuite,         "Error loading suite.",
     StrID_Err_FreeSuite,         "Error releasing suite."
 };

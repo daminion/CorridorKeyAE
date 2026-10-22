@@ -12,6 +12,7 @@
 #include "CK_Render.h"
 #include "CK_Hint.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -352,6 +353,24 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(CACHE_END_DISK_ID);
 
+    // --- Hint Layer (v0.5, appended) ----------------------------------------
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPIC(STR(StrID_HintLayerGroup_Name), HINTL_START_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_LAYER(STR(StrID_HintLayer_Name), PF_LayerDefault_NONE, HINT_LAYER_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_HintLayerUse_Name),
+                  CK_HL_NUM,
+                  CK_HL_OFF,
+                  STR(StrID_HintLayerUse_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  HINT_LAYER_USE_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(HINTL_END_DISK_ID);
+
     if (!err)
     {
         PF_CustomUIInfo ci;
@@ -604,6 +623,97 @@ static bool BuildHint(PF_InData* in_data, PF_ParamDef* params[],
 }
 
 // ---------------------------------------------------------------------------
+// Hint Layer -> first-frame hint or per-frame hint folder
+// ---------------------------------------------------------------------------
+
+// Renders the Matte Layer's alpha (or luminance, if it has no alpha) at the
+// source's frame times. AE hands the layer over in its own pixel space with
+// its effects applied (masks on that layer are not included).
+static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
+                               CK_JobRequest& req, bool every_frame,
+                               std::string& error)
+{
+    if (req.width <= 0 || req.height <= 0 || req.fps <= 0)
+    {
+        error = "Couldn't read the source size or frame rate for the Hint Layer.";
+        return false;
+    }
+
+    AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data, kPFWorldSuite,
+                                                 kPFWorldSuiteVersion2, out_data);
+
+    // One extra frame so rounding in the clip length never leaves us short.
+    const int count = every_frame ? std::max(1, req.frames_total + 1) : 1;
+    bool use_luma = false;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const A_long t = (A_long)((double)i * in_data->time_scale / req.fps + 0.5);
+
+        PF_ParamDef p;
+        AEFX_CLR_STRUCT(p);
+        PF_Err err = PF_CHECKOUT_PARAM(in_data, CK_HINT_LAYER, t,
+                                       in_data->time_step, in_data->time_scale, &p);
+        if (err)
+        {
+            error = "Couldn't read the Matte Layer.";
+            return false;
+        }
+
+        PF_EffectWorld* w = &p.u.ld;
+        std::vector<unsigned char> matte;
+        bool opaque = false, empty = true;
+
+        if (w->data && w->width > 0 && w->height > 0)
+        {
+            PF_PixelFormat fmt = PF_PixelFormat_ARGB32;
+            world_suite->PF_GetPixelFormat(w, &fmt);
+            const CK_PixelKind kind = fmt == PF_PixelFormat_ARGB128 ? CK_PIX_32F
+                                    : fmt == PF_PixelFormat_ARGB64  ? CK_PIX_16
+                                                                    : CK_PIX_8;
+
+            CK_WorldToHint(w->data, w->rowbytes, w->width, w->height, kind, use_luma,
+                           req.width, req.height, matte, &opaque, &empty);
+
+            // A fully opaque layer has no alpha matte: read it as black/white instead.
+            if (i == 0 && opaque)
+            {
+                use_luma = true;
+                CK_WorldToHint(w->data, w->rowbytes, w->width, w->height, kind, use_luma,
+                               req.width, req.height, matte, &opaque, &empty);
+            }
+        }
+        else
+        {
+            matte.assign((size_t)req.width * req.height, 0);
+        }
+
+        PF_CHECKIN_PARAM(in_data, &p);
+
+        if (i == 0 && empty)
+        {
+            error = "The Matte Layer has no matte at the first frame of the clip.\n\n"
+                    "Pick a layer under Hint Layer > Matte Layer (its alpha, or white = subject),\n"
+                    "or set Hint Layer > Use to Off.";
+            return false;
+        }
+
+        std::string png = CK_EncodeGrayPng(matte, req.width, req.height);
+        if (png.empty())
+        {
+            error = "Couldn't encode the hint image.";
+            return false;
+        }
+
+        if (every_frame)
+            req.hint_frames.push_back(std::move(png));
+        else
+            req.hint_png = std::move(png);
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Buttons
 // ---------------------------------------------------------------------------
 
@@ -663,7 +773,17 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     req.hint_quality = (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0);
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
 
-    if (!BuildHint(in_data, params, req, error))
+    // Hint Layer takes priority over the Hint Mask when it's switched on.
+    const A_long hl_use = params[CK_HINT_LAYER_USE]->u.pd.value;
+    if (hl_use != CK_HL_OFF)
+    {
+        if (!BuildHintFromLayer(in_data, out_data, req, hl_use == CK_HL_EVERY_FRAME, error))
+        {
+            CK_ShowMessage(title, error);
+            return err;
+        }
+    }
+    else if (!BuildHint(in_data, params, req, error))
     {
         CK_ShowMessage(title, error);
         return err;

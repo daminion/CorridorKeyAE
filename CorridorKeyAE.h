@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 4
+#define MINOR_VERSION 5
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -63,6 +63,11 @@ enum
     CK_RESET_CACHE,
     CK_EDIT_SETTINGS,
     CK_CACHE_END,
+    // v0.5 (appended)
+    CK_HINTL_START,
+    CK_HINT_LAYER,
+    CK_HINT_LAYER_USE,
+    CK_HINTL_END,
     CK_NUM_PARAMS
 };
 
@@ -84,7 +89,20 @@ enum
     EDIT_SETTINGS_DISK_ID,
     STATUS_DISK_ID,
     CACHE_END_DISK_ID,
-    WORKING_SPACE_DISK_ID
+    WORKING_SPACE_DISK_ID,
+    HINTL_START_DISK_ID,
+    HINT_LAYER_DISK_ID,
+    HINT_LAYER_USE_DISK_ID,
+    HINTL_END_DISK_ID
+};
+
+// Hint Layer > Use popup
+enum
+{
+    CK_HL_OFF = 1,
+    CK_HL_FIRST_FRAME,
+    CK_HL_EVERY_FRAME,
+    CK_HL_NUM = CK_HL_EVERY_FRAME
 };
 
 // Working Space popup

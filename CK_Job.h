@@ -9,9 +9,11 @@
 //   done.flag    created when infer.py exits OK
 //   failed.flag  created when infer.py exits with an error
 //   source.txt   the source path, for reference
-//   hint_frame0.png  first-frame hint from the Hint Mask (when one is set)
+//   hint_frame0.png  first-frame hint (Hint Mask, or Hint Layer > First Frame)
+//   hint_frames\hint_000000.png ...  per-frame hint (Hint Layer > Every Frame)
 
 #include <string>
+#include <vector>
 
 struct CK_JobRequest
 {
@@ -24,6 +26,7 @@ struct CK_JobRequest
     int         width = 0;           // source resolution
     int         height = 0;
     std::string hint_png;            // first-frame hint PNG bytes ("" = no hint)
+    std::vector<std::string> hint_frames;  // per-frame hint PNGs (empty = none)
 };
 
 enum CK_JobState

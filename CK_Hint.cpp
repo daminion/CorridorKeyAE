@@ -115,3 +115,89 @@ std::string CK_EncodeGrayPng(const std::vector<unsigned char>& pixels,
     mz_free(png);
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Hint Layer
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    // Returns (alpha, luma) of pixel x,y in 0..1.
+    void ReadPixel(const void* data, long rowbytes, int x, int y, CK_PixelKind kind,
+                   float& a, float& l)
+    {
+        const char* row = static_cast<const char*>(data) + (size_t)y * rowbytes;
+        float r, g, b;
+        switch (kind)
+        {
+            case CK_PIX_32F:
+            {
+                const float* p = reinterpret_cast<const float*>(row) + (size_t)x * 4;
+                a = p[0]; r = p[1]; g = p[2]; b = p[3];
+                break;
+            }
+            case CK_PIX_16:
+            {
+                const unsigned short* p = reinterpret_cast<const unsigned short*>(row) + (size_t)x * 4;
+                a = p[0] / 32768.0f; r = p[1] / 32768.0f; g = p[2] / 32768.0f; b = p[3] / 32768.0f;
+                break;
+            }
+            default:
+            {
+                const unsigned char* p = reinterpret_cast<const unsigned char*>(row) + (size_t)x * 4;
+                a = p[0] / 255.0f; r = p[1] / 255.0f; g = p[2] / 255.0f; b = p[3] / 255.0f;
+                break;
+            }
+        }
+        l = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    }
+}
+
+void CK_WorldToHint(const void* data, long rowbytes, int w, int h,
+                    CK_PixelKind kind, bool use_luma,
+                    int out_w, int out_h,
+                    std::vector<unsigned char>& out,
+                    bool* alpha_fully_opaque, bool* matte_empty)
+{
+    out.assign((size_t)out_w * out_h, 0);
+    if (alpha_fully_opaque) *alpha_fully_opaque = false;
+    if (matte_empty) *matte_empty = true;
+    if (!data || w <= 0 || h <= 0 || out_w <= 0 || out_h <= 0)
+        return;
+
+    // Source matte at native size first, so opacity checks see every pixel.
+    std::vector<float> m((size_t)w * h);
+    bool opaque = true;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            float a, l;
+            ReadPixel(data, rowbytes, x, y, kind, a, l);
+            if (a < 0.999f) opaque = false;
+            float v = use_luma ? l * a : a;
+            m[(size_t)y * w + x] = std::min(1.0f, std::max(0.0f, v));
+        }
+    if (alpha_fully_opaque) *alpha_fully_opaque = opaque;
+
+    const float sx = (float)w / out_w, sy = (float)h / out_h;
+    bool empty = true;
+    for (int y = 0; y < out_h; ++y)
+    {
+        float fy = std::min(std::max((y + 0.5f) * sy - 0.5f, 0.0f), (float)(h - 1));
+        int y0 = (int)fy, y1 = std::min(y0 + 1, h - 1);
+        float ty = fy - y0;
+        for (int x = 0; x < out_w; ++x)
+        {
+            float fx = std::min(std::max((x + 0.5f) * sx - 0.5f, 0.0f), (float)(w - 1));
+            int x0 = (int)fx, x1 = std::min(x0 + 1, w - 1);
+            float tx = fx - x0;
+            float top = m[(size_t)y0 * w + x0] * (1 - tx) + m[(size_t)y0 * w + x1] * tx;
+            float bot = m[(size_t)y1 * w + x0] * (1 - tx) + m[(size_t)y1 * w + x1] * tx;
+            float v = top * (1 - ty) + bot * ty;
+            unsigned char c = (unsigned char)(v * 255.0f + 0.5f);
+            out[(size_t)y * out_w + x] = c;
+            if (c > 127) empty = false;
+        }
+    }
+    if (matte_empty) *matte_empty = empty;
+}

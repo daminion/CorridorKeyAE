@@ -25,6 +25,10 @@ typedef enum {
     StrID_EditSettings_Name,
     StrID_EditSettings_Button,
     StrID_Status_Name,
+    StrID_HintLayerGroup_Name,
+    StrID_HintLayer_Name,
+    StrID_HintLayerUse_Name,
+    StrID_HintLayerUse_Choices,
     StrID_Err_LoadSuite,
     StrID_Err_FreeSuite,
     StrID_NUMTYPES
