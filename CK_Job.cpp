@@ -79,8 +79,9 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
 {
     std::string key = Lower(req.source_path) + "|" + CK_FileStamp(req.source_path);
     char settings[128];
-    std::snprintf(settings, sizeof(settings), "|q=%.3f|lv=%d|seq=%d|fps=%.4f",
-                  req.hint_quality, req.low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps);
+    std::snprintf(settings, sizeof(settings), "|q=%.3f|lv=%d|seq=%d|fps=%.4f|hint=%016llx",
+                  req.hint_quality, req.low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps,
+                  req.hint_png.empty() ? 0ULL : Fnv1a(req.hint_png));
     key += settings;
 
     char hex[17];
@@ -108,6 +109,14 @@ bool CK_StartJob(const std::string& job_dir,
     CK_RemoveFile(job_dir + "\\pid.txt");
     CK_WriteTextFile(job_dir + "\\source.txt", req.source_path + "\r\n");
 
+    const std::string hint_path = job_dir + "\\hint_frame0.png";
+    CK_RemoveFile(hint_path);
+    if (!req.hint_png.empty() && !CK_WriteTextFile(hint_path, req.hint_png))
+    {
+        error = "Couldn't write the hint image:\n  " + hint_path;
+        return false;
+    }
+
     std::string input = req.is_sequence ? ParentDir(req.source_path) : req.source_path;
 
     char num[64];
@@ -115,8 +124,12 @@ bool CK_StartJob(const std::string& job_dir,
     args += " --input " + Quote(input);
     args += " --output_dir " + Quote(job_dir);
     args += " --output_format exr --exr_dtype half --outputs alpha fg";
-    std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);
-    args += num;
+    if (!req.hint_png.empty())
+    {
+        args += " --hint_first_frame " + Quote(hint_path);
+        std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);
+        args += num;
+    }
     if (req.low_vram)
         args += " --low_vram --temp_dir " + Quote(job_dir + "\\tmp");
     if (req.is_sequence)

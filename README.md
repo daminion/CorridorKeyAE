@@ -11,8 +11,8 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
 
 - Milestone 1 (done): parameter layout, settings file, per-effect cache folder, pass-through render.
 - Milestone 2 (done): Key Clip runs CorridorKey in the background (EXR alpha + fg into the cache), and the Status line shows progress. Clicking Key Clip again while it runs offers to cancel.
-- **Milestone 3 (testing):** the effect renders the cached key with live Output, Working Space, Despill, Matte Choke and Matte Gamma.
-- Milestone 4: Hint Mask → first-frame hint.
+- Milestone 3 (done): the effect renders the cached key with live Output, Working Space, Despill, Matte Choke and Matte Gamma.
+- **Milestone 4 (testing):** Hint Mask. Pick a closed mask on the layer; at Key Clip it is rasterized at the source's first frame into a hint PNG (white = subject) and passed to CorridorKey with Hint Quality as the trust level. Mask mode/invert/feather are ignored; only the shape counts.
 
 Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it.
 

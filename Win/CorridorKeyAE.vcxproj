@@ -332,6 +332,7 @@
     <ClCompile Include="..\CorridorKeyAE_UI.cpp" />
     <ClCompile Include="..\CK_Frames.cpp" />
     <ClCompile Include="..\CK_Render.cpp" />
+    <ClCompile Include="..\CK_Hint.cpp" />
     <ClCompile Include="..\third_party\miniz\miniz.c" />
   </ItemGroup>
   <ItemGroup>
@@ -345,6 +346,7 @@
     <ClInclude Include="..\CK_Job.h" />
     <ClInclude Include="..\CK_Frames.h" />
     <ClInclude Include="..\CK_Render.h" />
+    <ClInclude Include="..\CK_Hint.h" />
     <ClInclude Include="..\..\..\Headers\A.h" />
     <ClInclude Include="..\..\..\Headers\AE_AdvEffectSuites.h" />
     <ClInclude Include="..\..\..\Headers\AE_Effect.h" />

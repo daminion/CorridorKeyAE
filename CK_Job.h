@@ -9,6 +9,7 @@
 //   done.flag    created when infer.py exits OK
 //   failed.flag  created when infer.py exits with an error
 //   source.txt   the source path, for reference
+//   hint_frame0.png  first-frame hint from the Hint Mask (when one is set)
 
 #include <string>
 
@@ -20,6 +21,9 @@ struct CK_JobRequest
     int         frames_total = 0;
     float       hint_quality = 0.95f;
     bool        low_vram = false;
+    int         width = 0;           // source resolution
+    int         height = 0;
+    std::string hint_png;            // first-frame hint PNG bytes ("" = no hint)
 };
 
 enum CK_JobState

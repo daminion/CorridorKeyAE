@@ -10,6 +10,7 @@
 #include "CK_Job.h"
 #include "CK_Frames.h"
 #include "CK_Render.h"
+#include "CK_Hint.h"
 
 #include <cmath>
 #include <vector>
@@ -498,6 +499,13 @@ static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& 
 
     req.is_sequence = num_files > 1;
 
+    A_long w = 0, h = 0;
+    if (!suites.ItemSuite9()->AEGP_GetItemDimensions(itemH, &w, &h))
+    {
+        req.width = w;
+        req.height = h;
+    }
+
     AEGP_FootageInterp interp;
     AEFX_CLR_STRUCT(interp);
     if (!suites.FootageSuite5()->AEGP_GetFootageInterpretation(itemH, FALSE, &interp))
@@ -512,6 +520,86 @@ static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& 
     if (req.is_sequence && num_files > 0)
         req.frames_total = num_files;
 
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Hint Mask -> first-frame hint PNG
+// ---------------------------------------------------------------------------
+
+// Reads the chosen mask at the layer's first frame and rasterizes it at
+// source resolution. Returns false (with a message) if the mask can't be used.
+static bool BuildHint(PF_InData* in_data, PF_ParamDef* params[],
+                      CK_JobRequest& req, std::string& error)
+{
+    const PF_PathID path_id = params[CK_HINT_MASK]->u.path_d.path_id;
+    if (!path_id)
+        return true;   // no hint chosen
+
+    if (req.width <= 0 || req.height <= 0)
+    {
+        error = "Couldn't read the source size for the Hint Mask.";
+        return false;
+    }
+
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
+    PF_PathOutlinePtr pathP = NULL;
+    std::vector<CK_MaskVertex> verts;
+    PF_Boolean openB = FALSE;
+
+    // Layer time 0 = the first frame of the source, which is what CorridorKey hints.
+    ERR(suites.PathQuerySuite1()->PF_CheckoutPath(in_data->effect_ref, path_id, 0,
+                                                  in_data->time_step, in_data->time_scale,
+                                                  &pathP));
+    if (!err && pathP)
+    {
+        A_long num = 0;
+        ERR(suites.PathDataSuite1()->PF_PathNumSegments(in_data->effect_ref, pathP, &num));
+        ERR(suites.PathDataSuite1()->PF_PathIsOpen(in_data->effect_ref, pathP, &openB));
+
+        for (A_long i = 0; i < num && !err; ++i)
+        {
+            PF_PathVertex v;
+            AEFX_CLR_STRUCT(v);
+            ERR(suites.PathDataSuite1()->PF_PathVertexInfo(in_data->effect_ref, pathP, i, &v));
+            if (!err)
+                verts.push_back({v.x, v.y, v.tan_in_x, v.tan_in_y, v.tan_out_x, v.tan_out_y});
+        }
+    }
+    if (pathP)
+        ERR2(suites.PathQuerySuite1()->PF_CheckinPath(in_data->effect_ref, path_id, FALSE, pathP));
+
+    if (err || verts.size() < 3)
+    {
+        error = "The Hint Mask needs at least 3 points.";
+        return false;
+    }
+    if (openB)
+    {
+        error = "The Hint Mask is an open path. Close it so it surrounds the subject.";
+        return false;
+    }
+
+    std::vector<unsigned char> coverage;
+    CK_RasterizeMask(verts, req.width, req.height, coverage);
+
+    size_t filled = 0;
+    for (unsigned char c : coverage)
+        filled += c > 127;
+    if (filled == 0)
+    {
+        error = "The Hint Mask doesn't cover any of the first frame.\n\n"
+                "Check it surrounds the subject at the start of the clip.";
+        return false;
+    }
+
+    req.hint_png = CK_EncodeGrayPng(coverage, req.width, req.height);
+    if (req.hint_png.empty())
+    {
+        error = "Couldn't encode the hint image.";
+        return false;
+    }
     return true;
 }
 
@@ -574,6 +662,12 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     }
     req.hint_quality = (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0);
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
+
+    if (!BuildHint(in_data, params, req, error))
+    {
+        CK_ShowMessage(title, error);
+        return err;
+    }
 
     // 4. Where does it go?
     std::string cache_root = CK_ResolveCacheRoot(data.cache_override, gs);
