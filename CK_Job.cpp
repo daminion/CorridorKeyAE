@@ -1,6 +1,7 @@
 #include "CK_Job.h"
 #include "CK_Platform.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -130,9 +131,22 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
 {
     std::string key = Lower(req.source_path) + "|" + CK_FileStamp(req.source_path);
     char settings[128];
+    // Low VRAM only takes effect with a fixed window (see CK_StartJob).
+    const bool low_vram = req.low_vram && req.temporal_chunk > 0;
     std::snprintf(settings, sizeof(settings), "|q=%.3f|lv=%d|seq=%d|fps=%.4f",
-                  req.hint_quality, req.low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps);
+                  req.hint_quality, low_vram ? 1 : 0, req.is_sequence ? 1 : 0, req.fps);
     key += settings;
+    if (req.temporal_chunk > 0)
+    {
+        std::snprintf(settings, sizeof(settings), "|tw=%d", req.temporal_chunk);
+        key += settings;
+    }
+    if ((!req.hint_png.empty() || !req.hint_frames.empty()) &&
+        std::fabs(req.carry_quality - 0.95f) > 1e-4f)
+    {
+        std::snprintf(settings, sizeof(settings), "|cq=%.3f", req.carry_quality);
+        key += settings;
+    }
 
     // Optional parts are only added when used, so plain keys keep the id
     // they had in earlier versions and existing caches stay valid.
@@ -275,17 +289,28 @@ bool CK_StartJob(const std::string& job_dir,
     if (!req.hint_frames.empty())
     {
         args += " --hint_video " + Quote(hint_dir);
-        std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);
+        std::snprintf(num, sizeof(num), " --hint_quality %.3f --carry_hint_quality %.3f",
+                      req.hint_quality, req.carry_quality);
         args += num;
     }
     else if (!req.hint_png.empty())
     {
         args += " --hint_first_frame " + Quote(hint_path);
-        std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);
+        std::snprintf(num, sizeof(num), " --hint_quality %.3f --carry_hint_quality %.3f",
+                      req.hint_quality, req.carry_quality);
         args += num;
     }
-    if (req.low_vram)
-        args += " --low_vram --temp_dir " + Quote(job_dir + "\\tmp");
+    // Temporal window: leave it to CorridorKey (it sizes the window from free
+    // VRAM) unless a fixed size is chosen. Its --low_vram flag also switches
+    // the automatic choice off, so it's only passed with a fixed window.
+    if (req.temporal_chunk > 0)
+    {
+        std::snprintf(num, sizeof(num), " --hann_chunk %d --hann_stride %d",
+                      req.temporal_chunk, req.temporal_chunk > 1 ? req.temporal_chunk / 2 : 1);
+        args += num;
+        if (req.low_vram)
+            args += " --low_vram --temp_dir " + Quote(job_dir + "\\tmp");
+    }
     if (frame_dir)
     {
         std::snprintf(num, sizeof(num), " --frame_dir_fps %.6f", req.fps);

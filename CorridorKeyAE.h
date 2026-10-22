@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 7
+#define MINOR_VERSION 8
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -42,8 +42,8 @@ typedef struct CK_EffectData
     A_long reserved[6];
 } CK_EffectData;
 
-// Parameter order. Fixed from milestone 3 on: only append new params
-// (before CK_NUM_PARAMS) with new disk IDs.
+// Parameter order (indices). Saved projects are matched by disk ID, not by
+// index, so params can be regrouped as long as every disk ID stays the same.
 enum
 {
     CK_INPUT = 0,
@@ -54,29 +54,31 @@ enum
     CK_DESPILL,
     CK_MATTE_CHOKE,
     CK_MATTE_GAMMA,
-    CK_KEY_SETTINGS_START,
+    // Hint group
+    CK_HINT_START,
+    CK_HINT_SOURCE,
     CK_HINT_MASK,
-    CK_HINT_QUALITY,
+    CK_HINT_LAYER,
+    CK_HINT_QUALITY,        // shown as "Hint Strength"
+    CK_CARRY_QUALITY,       // shown as "Carry Strength"
+    CK_HINT_END,
+    // Key Settings group
+    CK_RANGE_START,
+    CK_KEY_RANGE,
+    CK_HANDLES,
+    CK_TEMPORAL,
     CK_LOW_VRAM,
-    CK_KEY_SETTINGS_END,
+    CK_RANGE_END,
+    // Cache group
     CK_CACHE_START,
     CK_CHOOSE_CACHE,
     CK_RESET_CACHE,
     CK_EDIT_SETTINGS,
     CK_CACHE_END,
-    // v0.5 (appended)
-    CK_HINTL_START,
-    CK_HINT_LAYER,
-    CK_HINT_LAYER_USE,
-    CK_HINTL_END,
-    // v0.6 (appended)
-    CK_RANGE_START,
-    CK_KEY_RANGE,
-    CK_HANDLES,
-    CK_RANGE_END,
     CK_NUM_PARAMS
 };
 
+// Disk IDs: never change or reuse a value. Retired ones stay listed.
 enum
 {
     KEY_CLIP_DISK_ID = 1,
@@ -84,11 +86,11 @@ enum
     DESPILL_DISK_ID,
     MATTE_CHOKE_DISK_ID,
     MATTE_GAMMA_DISK_ID,
-    KEY_SETTINGS_START_DISK_ID,
+    KEY_SETTINGS_START_DISK_ID,     // now the Hint group start
     HINT_MASK_DISK_ID,
     HINT_QUALITY_DISK_ID,
     LOW_VRAM_DISK_ID,
-    KEY_SETTINGS_END_DISK_ID,
+    KEY_SETTINGS_END_DISK_ID,       // now the Hint group end
     CACHE_START_DISK_ID,
     CHOOSE_CACHE_DISK_ID,
     RESET_CACHE_DISK_ID,
@@ -96,14 +98,40 @@ enum
     STATUS_DISK_ID,
     CACHE_END_DISK_ID,
     WORKING_SPACE_DISK_ID,
-    HINTL_START_DISK_ID,
+    HINTL_START_DISK_ID,            // retired (v0.5 Hint Layer group)
     HINT_LAYER_DISK_ID,
-    HINT_LAYER_USE_DISK_ID,
-    HINTL_END_DISK_ID,
-    RANGE_START_DISK_ID,
+    HINT_LAYER_USE_DISK_ID,         // retired (replaced by Hint Source)
+    HINTL_END_DISK_ID,              // retired
+    RANGE_START_DISK_ID,            // Key Settings group start
     KEY_RANGE_DISK_ID,
     HANDLES_DISK_ID,
-    RANGE_END_DISK_ID
+    RANGE_END_DISK_ID,              // Key Settings group end
+    // v0.8
+    HINT_SOURCE_DISK_ID,
+    CARRY_QUALITY_DISK_ID,
+    TEMPORAL_DISK_ID
+};
+
+// Hint Source popup
+enum
+{
+    CK_HS_OFF = 1,
+    CK_HS_MASK,
+    CK_HS_LAYER_FIRST,
+    CK_HS_LAYER_EVERY,
+    CK_HS_NUM = CK_HS_LAYER_EVERY
+};
+
+// Temporal Window popup: frames CorridorKey looks at together
+enum
+{
+    CK_TW_AUTO = 1,
+    CK_TW_80,
+    CK_TW_48,
+    CK_TW_24,
+    CK_TW_8,
+    CK_TW_1,
+    CK_TW_NUM = CK_TW_1
 };
 
 // Key Range popup
@@ -114,14 +142,6 @@ enum
     CK_RANGE_NUM = CK_RANGE_WHOLE
 };
 
-// Hint Layer > Use popup
-enum
-{
-    CK_HL_OFF = 1,
-    CK_HL_FIRST_FRAME,
-    CK_HL_EVERY_FRAME,
-    CK_HL_NUM = CK_HL_EVERY_FRAME
-};
 
 // Working Space popup
 enum

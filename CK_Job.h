@@ -24,8 +24,10 @@ struct CK_JobRequest
     int         frames_total = 0;    // frames to key (after trimming)
     bool        trimmed = false;     // key only start_frame .. start_frame + frames_total - 1
     int         start_frame = 0;     // first source frame keyed
-    float       hint_quality = 0.95f;
-    bool        low_vram = false;
+    float       hint_quality = 0.95f;     // Hint Strength
+    float       carry_quality = 0.95f;    // Carry Strength (CorridorKey default 0.95)
+    int         temporal_chunk = 0;       // frames per window; 0 = CorridorKey's automatic choice
+    bool        low_vram = false;         // only used with a fixed temporal_chunk
     int         width = 0;           // source resolution
     int         height = 0;
     std::string hint_png;            // first-frame hint PNG bytes ("" = no hint)

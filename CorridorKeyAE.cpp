@@ -355,9 +355,17 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                          0,
                          MATTE_GAMMA_DISK_ID);
 
-    // --- Key Settings: used by the next Key Clip run -----------------------
+    // --- Hint: tells CorridorKey which subject to keep (read at Key Clip) ---
     AEFX_CLR_STRUCT(def);
-    PF_ADD_TOPIC(STR(StrID_KeySettings_Name), KEY_SETTINGS_START_DISK_ID);
+    PF_ADD_TOPIC(STR(StrID_HintGroup_Name), KEY_SETTINGS_START_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_HintSource_Name),
+                  CK_HS_NUM,
+                  CK_HS_MASK,
+                  STR(StrID_HintSource_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  HINT_SOURCE_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     def.param_type = PF_Param_PATH;
@@ -365,6 +373,9 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     PF_STRCPY(def.PF_DEF_NAME, STR(StrID_HintMask_Name));
     def.u.path_d.dephault = 0;
     ERR(PF_ADD_PARAM(in_data, -1, &def));
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_LAYER(STR(StrID_HintLayer_Name), PF_LayerDefault_NONE, HINT_LAYER_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX(STR(StrID_HintQuality_Name),
@@ -375,13 +386,47 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                          HINT_QUALITY_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX(STR(StrID_CarryQuality_Name),
+                         0, 100, 0, 100, 95,
+                         PF_Precision_INTEGER,
+                         PF_ValueDisplayFlag_PERCENT,
+                         PF_ParamFlag_CANNOT_TIME_VARY,
+                         CARRY_QUALITY_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_END_TOPIC(KEY_SETTINGS_END_DISK_ID);
+
+    // --- Key Settings: range and time window for the next Key Clip ----------
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_TOPIC(STR(StrID_RangeGroup_Name), RANGE_START_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_KeyRange_Name),
+                  CK_RANGE_NUM,
+                  CK_RANGE_LAYER,
+                  STR(StrID_KeyRange_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  KEY_RANGE_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER(STR(StrID_Handles_Name), 0, 200, 0, 48, 8, HANDLES_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_Temporal_Name),
+                  CK_TW_NUM,
+                  CK_TW_AUTO,
+                  STR(StrID_Temporal_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  TEMPORAL_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_CHECKBOXX(STR(StrID_LowVRAM_Name),
                      FALSE,
                      PF_ParamFlag_CANNOT_TIME_VARY,
                      LOW_VRAM_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
-    PF_END_TOPIC(KEY_SETTINGS_END_DISK_ID);
+    PF_END_TOPIC(RANGE_END_DISK_ID);
 
     // --- Cache -------------------------------------------------------------
     AEFX_CLR_STRUCT(def);
@@ -410,42 +455,6 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(CACHE_END_DISK_ID);
-
-    // --- Hint Layer (v0.5, appended) ----------------------------------------
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_TOPIC(STR(StrID_HintLayerGroup_Name), HINTL_START_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_LAYER(STR(StrID_HintLayer_Name), PF_LayerDefault_NONE, HINT_LAYER_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_POPUPX(STR(StrID_HintLayerUse_Name),
-                  CK_HL_NUM,
-                  CK_HL_OFF,
-                  STR(StrID_HintLayerUse_Choices),
-                  PF_ParamFlag_CANNOT_TIME_VARY,
-                  HINT_LAYER_USE_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_END_TOPIC(HINTL_END_DISK_ID);
-
-    // --- Key Range (v0.6, appended) -----------------------------------------
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_TOPIC(STR(StrID_RangeGroup_Name), RANGE_START_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_POPUPX(STR(StrID_KeyRange_Name),
-                  CK_RANGE_NUM,
-                  CK_RANGE_LAYER,
-                  STR(StrID_KeyRange_Choices),
-                  PF_ParamFlag_CANNOT_TIME_VARY,
-                  KEY_RANGE_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_SLIDER(STR(StrID_Handles_Name), 0, 200, 0, 48, 8, HANDLES_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_END_TOPIC(RANGE_END_DISK_ID);
 
     if (!err)
     {
@@ -819,8 +828,8 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
         if (i == 0 && empty)
         {
             error = "The Matte Layer has no matte at the first keyed frame.\n\n"
-                    "Pick a layer under Hint Layer > Matte Layer (its alpha, or white = subject),\n"
-                    "or set Hint Layer > Use to Off.";
+                    "Pick a layer under Hint > Matte Layer (its alpha, or white = subject),\n"
+                    "or change Hint > Hint Source.";
             return false;
         }
 
@@ -897,20 +906,36 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
         return err;
     }
     req.hint_quality = (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0);
+    req.carry_quality = (float)(params[CK_CARRY_QUALITY]->u.fs_d.value / 100.0);
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
+    switch (params[CK_TEMPORAL]->u.pd.value)
+    {
+        case CK_TW_80: req.temporal_chunk = 80; break;
+        case CK_TW_48: req.temporal_chunk = 48; break;
+        case CK_TW_24: req.temporal_chunk = 24; break;
+        case CK_TW_8:  req.temporal_chunk = 8;  break;
+        case CK_TW_1:  req.temporal_chunk = 1;  break;
+        default:       req.temporal_chunk = 0;  break;   // Auto
+    }
     ApplyKeyRange(in_data, params, req);
 
-    // Hint Layer takes priority over the Hint Mask when it's switched on.
-    const A_long hl_use = params[CK_HINT_LAYER_USE]->u.pd.value;
-    if (hl_use != CK_HL_OFF)
+    // Hint Source decides where the hint comes from (if anywhere).
+    bool hint_ok = true;
+    switch (params[CK_HINT_SOURCE]->u.pd.value)
     {
-        if (!BuildHintFromLayer(in_data, out_data, req, hl_use == CK_HL_EVERY_FRAME, error))
-        {
-            CK_ShowMessage(title, error);
-            return err;
-        }
+        case CK_HS_MASK:
+            hint_ok = BuildHint(in_data, params, req, error);   // no mask picked = no hint
+            break;
+        case CK_HS_LAYER_FIRST:
+            hint_ok = BuildHintFromLayer(in_data, out_data, req, false, error);
+            break;
+        case CK_HS_LAYER_EVERY:
+            hint_ok = BuildHintFromLayer(in_data, out_data, req, true, error);
+            break;
+        default:
+            break;   // Off
     }
-    else if (!BuildHint(in_data, params, req, error))
+    if (!hint_ok)
     {
         CK_ShowMessage(title, error);
         return err;
