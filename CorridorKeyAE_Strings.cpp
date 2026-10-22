@@ -33,6 +33,7 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_HintSource_Name,       "Hint Source",
     StrID_HintSource_Choices,    "Off|Mask|Matte Layer (first frame)|Matte Layer (every frame)",
     StrID_CarryQuality_Name,     "Carry Strength",
+    StrID_ExactHint_Name,        "Follow Matte Exactly (every frame)",
     StrID_Temporal_Name,         "Temporal Window",
     StrID_Temporal_Choices,      "Auto (from free VRAM)|80 frames (max)|48 frames|24 frames|8 frames|1 frame (no temporal)",
     StrID_HintLayer_Name,        "Matte Layer",

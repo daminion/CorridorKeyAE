@@ -26,6 +26,8 @@ struct CK_JobRequest
     int         start_frame = 0;     // first source frame keyed
     float       hint_quality = 0.95f;     // Hint Strength
     float       carry_quality = 0.95f;    // Carry Strength (CorridorKey default 0.95)
+    bool        exact_hint = false;       // every-frame hint: don't replace it with the
+                                          // model's carried matte (--no_carry_hint)
     int         temporal_chunk = 0;       // frames per window; 0 = CorridorKey's automatic choice
     bool        low_vram = false;         // only used with a fixed temporal_chunk
     int         width = 0;           // source resolution

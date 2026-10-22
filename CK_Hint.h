@@ -34,9 +34,12 @@ enum CK_PixelKind
 
 // Matte from an AE layer buffer, resampled (bilinear) to out_w x out_h.
 // use_luma: take luminance instead of alpha (for black/white matte layers).
-// Reports whether the source alpha was fully opaque / fully transparent.
+// Reports whether the source alpha was fully opaque / fully transparent, and
+// (optionally) the mean colourfulness 0..1 (|R-G|+|G-B|)/2 - near 0 for a
+// black/white matte, clearly higher for ordinary footage.
 void CK_WorldToHint(const void* data, long rowbytes, int w, int h,
                     CK_PixelKind kind, bool use_luma,
                     int out_w, int out_h,
                     std::vector<unsigned char>& out,
-                    bool* alpha_fully_opaque, bool* matte_empty);
+                    bool* alpha_fully_opaque, bool* matte_empty,
+                    float* colourfulness = nullptr);

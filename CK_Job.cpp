@@ -162,6 +162,8 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
             h = Fnv1a(f, h);
         std::snprintf(settings, sizeof(settings), "|hv=%016llx", h);
         key += settings;
+        if (req.exact_hint)
+            key += "|nocarry";
     }
     if (req.trimmed)
     {
@@ -289,9 +291,19 @@ bool CK_StartJob(const std::string& job_dir,
     if (!req.hint_frames.empty())
     {
         args += " --hint_video " + Quote(hint_dir);
-        std::snprintf(num, sizeof(num), " --hint_quality %.3f --carry_hint_quality %.3f",
-                      req.hint_quality, req.carry_quality);
+        std::snprintf(num, sizeof(num), " --hint_quality %.3f", req.hint_quality);
         args += num;
+        // By default CorridorKey replaces the hint with its own carried matte on
+        // the frames where its time windows overlap (about half of them). For an
+        // authoritative matte like a Roto Brush pass, its README recommends
+        // switching that off.
+        if (req.exact_hint)
+            args += " --no_carry_hint";
+        else
+        {
+            std::snprintf(num, sizeof(num), " --carry_hint_quality %.3f", req.carry_quality);
+            args += num;
+        }
     }
     else if (!req.hint_png.empty())
     {

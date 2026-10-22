@@ -124,7 +124,7 @@ namespace
 {
     // Returns (alpha, luma) of pixel x,y in 0..1.
     void ReadPixel(const void* data, long rowbytes, int x, int y, CK_PixelKind kind,
-                   float& a, float& l)
+                   float& a, float& l, float* chroma = nullptr)
     {
         const char* row = static_cast<const char*>(data) + (size_t)y * rowbytes;
         float r, g, b;
@@ -150,6 +150,8 @@ namespace
             }
         }
         l = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+        if (chroma)
+            *chroma = (std::fabs(r - g) + std::fabs(g - b)) * 0.5f;
     }
 }
 
@@ -157,27 +159,32 @@ void CK_WorldToHint(const void* data, long rowbytes, int w, int h,
                     CK_PixelKind kind, bool use_luma,
                     int out_w, int out_h,
                     std::vector<unsigned char>& out,
-                    bool* alpha_fully_opaque, bool* matte_empty)
+                    bool* alpha_fully_opaque, bool* matte_empty,
+                    float* colourfulness)
 {
     out.assign((size_t)out_w * out_h, 0);
     if (alpha_fully_opaque) *alpha_fully_opaque = false;
     if (matte_empty) *matte_empty = true;
+    if (colourfulness) *colourfulness = 0.0f;
     if (!data || w <= 0 || h <= 0 || out_w <= 0 || out_h <= 0)
         return;
 
     // Source matte at native size first, so opacity checks see every pixel.
     std::vector<float> m((size_t)w * h);
     bool opaque = true;
+    double chroma_sum = 0.0;
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
         {
-            float a, l;
-            ReadPixel(data, rowbytes, x, y, kind, a, l);
+            float a, l, c = 0.0f;
+            ReadPixel(data, rowbytes, x, y, kind, a, l, &c);
+            chroma_sum += c;
             if (a < 0.999f) opaque = false;
             float v = use_luma ? l * a : a;
             m[(size_t)y * w + x] = std::min(1.0f, std::max(0.0f, v));
         }
     if (alpha_fully_opaque) *alpha_fully_opaque = opaque;
+    if (colourfulness) *colourfulness = (float)(chroma_sum / ((double)w * h));
 
     const float sx = (float)w / out_w, sy = (float)h / out_h;
     bool empty = true;

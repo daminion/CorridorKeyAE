@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 8
+#define MINOR_VERSION 9
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -61,6 +61,7 @@ enum
     CK_HINT_LAYER,
     CK_HINT_QUALITY,        // shown as "Hint Strength"
     CK_CARRY_QUALITY,       // shown as "Carry Strength"
+    CK_EXACT_HINT,          // every-frame hint: no carried model matte (--no_carry_hint)
     CK_HINT_END,
     // Key Settings group
     CK_RANGE_START,
@@ -109,7 +110,8 @@ enum
     // v0.8
     HINT_SOURCE_DISK_ID,
     CARRY_QUALITY_DISK_ID,
-    TEMPORAL_DISK_ID
+    TEMPORAL_DISK_ID,
+    EXACT_HINT_DISK_ID
 };
 
 // Hint Source popup

@@ -394,6 +394,12 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                          CARRY_QUALITY_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX(STR(StrID_ExactHint_Name),
+                     TRUE,
+                     PF_ParamFlag_CANNOT_TIME_VARY,
+                     EXACT_HINT_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(KEY_SETTINGS_END_DISK_ID);
 
     // --- Key Settings: range and time window for the next Key Clip ----------
@@ -807,12 +813,26 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
                                     : fmt == PF_PixelFormat_ARGB64  ? CK_PIX_16
                                                                     : CK_PIX_8;
 
+            float colour = 0.0f;
             CK_WorldToHint(w->data, w->rowbytes, w->width, w->height, kind, use_luma,
-                           req.width, req.height, matte, &opaque, &empty);
+                           req.width, req.height, matte, &opaque, &empty, &colour);
 
-            // A fully opaque layer has no alpha matte: read it as black/white instead.
+            // A fully opaque layer has no alpha matte. If it's black & white, read
+            // its brightness as the matte. If it's colourful, it's ordinary footage:
+            // almost always a Roto Brush (or masked) layer picked directly, which AE
+            // hands to effects WITHOUT its effects and masks.
             if (i == 0 && opaque)
             {
+                if (colour > 0.03f)
+                {
+                    PF_CHECKIN_PARAM(in_data, &p);
+                    error = "The Matte Layer has no transparency and looks like ordinary footage.\n\n"
+                            "After Effects gives effects another layer WITHOUT its masks or effects,\n"
+                            "so a Roto Brush or masked layer can't be used directly.\n\n"
+                            "Fix: select that layer, Layer > Pre-compose (Move all attributes),\n"
+                            "then pick the new precomp as the Matte Layer.";
+                    return false;
+                }
                 use_luma = true;
                 CK_WorldToHint(w->data, w->rowbytes, w->width, w->height, kind, use_luma,
                                req.width, req.height, matte, &opaque, &empty);
@@ -907,6 +927,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     }
     req.hint_quality = (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0);
     req.carry_quality = (float)(params[CK_CARRY_QUALITY]->u.fs_d.value / 100.0);
+    req.exact_hint = params[CK_EXACT_HINT]->u.bd.value != 0;
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
     switch (params[CK_TEMPORAL]->u.pd.value)
     {
