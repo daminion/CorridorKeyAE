@@ -271,12 +271,12 @@ size_t CK_ClearUnusedFg(std::vector<float>& rgb, const std::vector<float>& alpha
     if (w <= 0 || h <= 0 || alpha.size() < (size_t)w * h || rgb.size() < (size_t)w * h * 3)
         return 0;
 
-    // Pass 1 (rows): near[i] = some alpha > 0 within r pixels horizontally.
-    std::vector<unsigned char> near((size_t)w * h, 0);
+    // Pass 1 (rows): hasMatte[i] = some alpha > 0 within r pixels horizontally.
+    std::vector<unsigned char> hasMatte((size_t)w * h, 0);
     for (int y = 0; y < h; ++y)
     {
         const float* a = alpha.data() + (size_t)y * w;
-        unsigned char* n = near.data() + (size_t)y * w;
+        unsigned char* n = hasMatte.data() + (size_t)y * w;
         int count = 0;
         for (int x = 0; x < r && x < w; ++x)          // prime the window [x - r, x + r]
             count += a[x] > 0.0f;
@@ -294,11 +294,11 @@ size_t CK_ClearUnusedFg(std::vector<float>& rgb, const std::vector<float>& alpha
     {
         int count = 0;
         for (int y = 0; y < r && y < h; ++y)
-            count += near[(size_t)y * w + x];
+            count += hasMatte[(size_t)y * w + x];
         for (int y = 0; y < h; ++y)
         {
-            if (y + r < h) count += near[(size_t)(y + r) * w + x];
-            if (y - r - 1 >= 0) count -= near[(size_t)(y - r - 1) * w + x];
+            if (y + r < h) count += hasMatte[(size_t)(y + r) * w + x];
+            if (y - r - 1 >= 0) count -= hasMatte[(size_t)(y - r - 1) * w + x];
             if (count == 0)
             {
                 float* p = rgb.data() + ((size_t)y * w + x) * 3;
