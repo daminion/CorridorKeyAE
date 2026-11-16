@@ -124,6 +124,9 @@ void CK_TrackJob(const std::string& job_dir);
 // after their final change has been reported.
 bool CK_PollTrackedJobs();
 
+// Jobs that went from running to done since the last call (main thread).
+std::vector<std::string> CK_TakeFinishedJobs();
+
 // Fills phase / windows from log text (exposed for testing).
 void CK_ParseJobLog(const std::string& log, CK_JobStatus& st);
 

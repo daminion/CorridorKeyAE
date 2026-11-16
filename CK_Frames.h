@@ -81,3 +81,6 @@ bool CK_LoadFramePair(const std::string& fg_path,
 std::shared_ptr<const CK_Frame> CK_GetKeyedFrame(const std::string& job_dir,
                                                  int index,
                                                  long generation);
+
+// Forgets cached frames and folder names for a job (it's being re-keyed).
+void CK_ForgetJobFrames(const std::string& job_dir);

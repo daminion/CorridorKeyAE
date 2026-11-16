@@ -82,6 +82,7 @@ namespace
 
     std::mutex g_track_mutex;
     std::map<std::string, std::string> g_tracked;   // job_dir -> last reported signature
+    std::vector<std::string> g_finished;             // running -> done since last taken
 
     std::string Signature(const CK_JobStatus& st)
     {
@@ -121,6 +122,9 @@ bool CK_PollTrackedJobs()
             continue;
         if (it->second != sig)
         {
+            const bool was_running = it->second.compare(0, 2, "1:") == 0;   // CK_JOB_RUNNING
+            if (was_running && st.state == CK_JOB_DONE)
+                g_finished.push_back(dir);
             it->second = sig;
             changed = true;
         }
@@ -130,6 +134,14 @@ bool CK_PollTrackedJobs()
         }
     }
     return changed;
+}
+
+std::vector<std::string> CK_TakeFinishedJobs()
+{
+    std::lock_guard<std::mutex> lock(g_track_mutex);
+    std::vector<std::string> out;
+    out.swap(g_finished);
+    return out;
 }
 
 std::string CK_JobLogPath(const std::string& job_dir)
@@ -244,6 +256,18 @@ bool CK_StartJob(const std::string& job_dir,
     CK_RemoveFile(job_dir + "\\compact2.done");
     CK_RemoveFile(job_dir + "\\compact3.txt");
     CK_RemoveFile(job_dir + "\\compact3.done");
+    // Keying again from scratch: drop the old result, so nothing shows the
+    // previous key's frames while the new one runs.
+    for (const char* suffix : { "_fg_exr", "_alpha_exr" })
+        for (std::string sub = CK_FindSubdir(job_dir, suffix); !sub.empty();
+             sub = CK_FindSubdir(job_dir, suffix))
+            if (!CK_RemoveTree(sub))
+                break;
+    for (const char* tmp : { "_joining_fg", "_joining_alpha", "_ref_in_fwd", "_ref_in_bwd",
+                             "_ref_out_fwd", "_ref_out_bwd" })
+        CK_RemoveTree(job_dir + "\\" + tmp);
+    CK_ForgetJobFrames(job_dir);
+
     if (req.compact)
         CK_WriteTextFile(job_dir + "\\compact.flag", "");
     else

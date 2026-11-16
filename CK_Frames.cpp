@@ -264,6 +264,22 @@ std::shared_ptr<const CK_Frame> CK_GetKeyedFrame(const std::string& job_dir,
     return frame;
 }
 
+void CK_ForgetJobFrames(const std::string& job_dir)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_subdirs.erase(job_dir);
+    for (auto it = g_order.begin(); it != g_order.end();)
+    {
+        if (it->compare(0, job_dir.size() + 1, job_dir + "|") == 0)
+        {
+            g_frames.erase(*it);
+            it = g_order.erase(it);
+        }
+        else
+            ++it;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Compact Keys
 // ---------------------------------------------------------------------------

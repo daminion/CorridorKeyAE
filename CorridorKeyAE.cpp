@@ -14,6 +14,7 @@
 #include "CK_Preview.h"
 
 #include <algorithm>
+#include <map>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -259,6 +260,99 @@ static std::string QueryProjectDir(SPBasicSuite* basic)
     return dir;
 }
 
+// Layers waiting on a key: job folder -> (comp item ID, layer ID). Main thread only.
+static std::map<std::string, std::vector<std::pair<A_long, A_long>>> S_watchers;
+
+static void WatchJob(PF_InData* in_data, const std::string& job_dir)
+{
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    AEGP_LayerH layerH = NULL;
+    AEGP_CompH compH = NULL;
+    AEGP_ItemH itemH = NULL;
+    A_long item_id = 0;
+    AEGP_LayerIDVal layer_id = 0;
+    if (suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layerH) || !layerH ||
+        suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id) ||
+        suites.LayerSuite9()->AEGP_GetLayerParentComp(layerH, &compH) || !compH ||
+        suites.CompSuite11()->AEGP_GetItemFromComp(compH, &itemH) || !itemH ||
+        suites.ItemSuite9()->AEGP_GetItemID(itemH, &item_id))
+        return;
+    auto& list = S_watchers[job_dir];
+    const std::pair<A_long, A_long> me(item_id, (A_long)layer_id);
+    if (std::find(list.begin(), list.end(), me) == list.end())
+        list.push_back(me);
+}
+
+// Bumps the hidden Refresh param of every CorridorKey effect on one layer,
+// as a single undo step. A real parameter change is what makes AE re-render
+// the frame that's on screen (PF_RefreshAllWindows only redraws panels).
+static void BumpRefresh(AEGP_SuiteHandler& suites, A_long item_id, A_long layer_id)
+{
+    AEGP_ProjectH projH = NULL;
+    AEGP_ItemH itemH = NULL;
+    if (suites.ProjSuite6()->AEGP_GetProjectByIndex(0, &projH) ||
+        suites.ItemSuite9()->AEGP_GetFirstProjItem(projH, &itemH))
+        return;
+    while (itemH)
+    {
+        A_long id = 0;
+        if (!suites.ItemSuite9()->AEGP_GetItemID(itemH, &id) && id == item_id)
+            break;
+        AEGP_ItemH next = NULL;
+        if (suites.ItemSuite9()->AEGP_GetNextProjItem(projH, itemH, &next))
+            next = NULL;
+        itemH = next;
+    }
+    AEGP_CompH compH = NULL;
+    AEGP_LayerH layerH = NULL;
+    if (!itemH || suites.CompSuite11()->AEGP_GetCompFromItem(itemH, &compH) || !compH ||
+        suites.LayerSuite9()->AEGP_GetLayerFromLayerID(compH, layer_id, &layerH) || !layerH)
+        return;
+
+    A_long num = 0;
+    if (suites.EffectSuite4()->AEGP_GetLayerNumEffects(layerH, &num))
+        return;
+    bool grouped = false;
+    for (A_long i = 0; i < num; ++i)
+    {
+        AEGP_EffectRefH effectH = NULL;
+        if (suites.EffectSuite4()->AEGP_GetLayerEffectByIndex(S_plugin_id, layerH, i, &effectH) || !effectH)
+            continue;
+        AEGP_InstalledEffectKey key = 0;
+        A_char match[AEGP_MAX_EFFECT_MATCH_NAME_SIZE + 1] = { 0 };
+        if (!suites.EffectSuite4()->AEGP_GetInstalledKeyFromLayerEffect(effectH, &key) &&
+            !suites.EffectSuite4()->AEGP_GetEffectMatchName(key, match) &&
+            std::strcmp(match, CK_MATCH_NAME) == 0)
+        {
+            AEGP_StreamRefH streamH = NULL;
+            if (!suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(S_plugin_id, effectH, CK_REFRESH, &streamH) &&
+                streamH)
+            {
+                AEGP_StreamValue2 val;
+                AEFX_CLR_STRUCT(val);
+                A_Time t = { 0, 1 };
+                if (!suites.StreamSuite5()->AEGP_GetNewStreamValue(S_plugin_id, streamH, AEGP_LTimeMode_LayerTime,
+                                                                   &t, FALSE, &val))
+                {
+                    if (!grouped)
+                    {
+                        suites.UtilitySuite6()->AEGP_StartUndoGroup("CorridorKey: key finished");
+                        grouped = true;
+                    }
+                    val.val.one_d = val.val.one_d >= 999999.0 ? 0.0 : val.val.one_d + 1.0;
+                    suites.StreamSuite5()->AEGP_SetStreamValue(S_plugin_id, streamH, &val);
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&val);
+                    CK_DebugLog("BUMP refresh item=%d layer=%d", (int)item_id, (int)layer_id);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+        }
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+    }
+    if (grouped)
+        suites.UtilitySuite6()->AEGP_EndUndoGroup();
+}
+
 static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL)
 {
     static unsigned long last = 0;
@@ -289,6 +383,28 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
     const bool project_changed = CK_SetProjectDir(QueryProjectDir(S_basic));
 
     const bool jobs_changed = CK_PollTrackedJobs();
+
+    // Keys that just finished: make AE re-render the layers showing them.
+    const std::vector<std::string> finished = CK_TakeFinishedJobs();
+    if (!finished.empty() && S_basic)
+    {
+        try
+        {
+            AEGP_SuiteHandler suites(S_basic);
+            for (const std::string& job : finished)
+            {
+                auto it = S_watchers.find(job);
+                if (it == S_watchers.end())
+                    continue;
+                for (const auto& w : it->second)
+                    BumpRefresh(suites, w.first, w.second);
+                S_watchers.erase(it);
+            }
+        }
+        catch (...)
+        {
+        }
+    }
     if (jobs_changed || compact_changed)
         CK_DebugLog("HOOK refresh jobs=%d compact=%d", (int)jobs_changed, (int)compact_changed);
     if ((jobs_changed || preview_changed || project_changed || compact_changed) && S_basic)
@@ -565,6 +681,23 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(CACHE_END_DISK_ID);
+
+    // Hidden. AE only re-renders the frame on screen when a parameter really
+    // changes, so the idle hook bumps this when a key finishes (BumpRefresh).
+    AEFX_CLR_STRUCT(def);
+    def.param_type = PF_Param_FLOAT_SLIDER;
+    def.flags = PF_ParamFlag_CANNOT_TIME_VARY;
+    def.ui_flags = PF_PUI_INVISIBLE;
+    std::strcpy(def.name, "Refresh");
+    def.u.fs_d.valid_min = 0;
+    def.u.fs_d.valid_max = 1000000;
+    def.u.fs_d.slider_min = 0;
+    def.u.fs_d.slider_max = 1000000;
+    def.u.fs_d.value = 0;
+    def.u.fs_d.dephault = 0;
+    def.u.fs_d.precision = 0;
+    def.uu.id = REFRESH_DISK_ID;
+    ERR(PF_ADD_PARAM(in_data, -1, &def));
 
     if (!err)
     {
@@ -1421,6 +1554,9 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     }
     if (!starting && !staging.empty())
         CK_RemoveTree(staging);   // reused an existing key: rendered frames not needed
+
+    if (starting)
+        WatchJob(in_data, job_dir);
 
     SetPathField(data.job_dir, job_dir);
     data.frames_total = req.frames_total;
