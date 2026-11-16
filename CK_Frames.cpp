@@ -316,7 +316,7 @@ size_t CK_CompactFg(std::vector<float>& rgb, const std::vector<float>& alpha,
     std::vector<unsigned char> nonzero(n), soft(n), near_nonzero, near_soft;
     for (size_t i = 0; i < n; ++i)
     {
-        nonzero[i] = alpha[i] > 0.0f;
+        nonzero[i] = alpha[i] > CK_COMPACT_INVISIBLE;
         soft[i] = alpha[i] < CK_COMPACT_SOLID;
     }
     Dilate(nonzero, near_nonzero, w, h, r);

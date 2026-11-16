@@ -45,14 +45,21 @@ bool CK_WriteExrRGB(const std::string& path, int width, int height,
 // Keep this at least (largest choke) + 1 if the slider range ever grows.
 #define CK_COMPACT_BORDER 21
 
-// Alpha at or above this counts as solid. Even at the lowest Matte Gamma
-// (0.1, i.e. a^10) it stays >= 0.98, where Keep Original shows only the plate.
-#define CK_COMPACT_SOLID 0.999f
+// Tuned on a real 4K CorridorKey key (2026-11-16): 65% of its alpha was
+// exactly 0, ~5% was background noise up to 0.001, and much of the subject's
+// interior sat at 0.995-0.998 rather than 1.0.
+//
+// Alpha at or above SOLID counts as solid: for Matte Gamma >= 0.5 it stays
+// >= 0.98, where Keep Original shows only the plate.
+// Alpha at or below INVISIBLE counts as empty: at most 0.1% opacity at Gamma 1.
+#define CK_COMPACT_SOLID 0.99f
+#define CK_COMPACT_INVISIBLE 0.001f
 
-// Keeps CorridorKey's fg only where it can show: pixels with both a non-zero
-// and a non-solid alpha within `border` pixels (square). Everywhere else the
-// fg is set to NaN, meaning "use the plate" (CK_RenderKey). With Keep
-// Original on, every output mode except Foreground is unchanged.
+// Keeps CorridorKey's fg only where it can show: pixels with an alpha above
+// INVISIBLE and an alpha below SOLID within `border` pixels (square).
+// Everywhere else the fg is set to NaN, meaning "use the plate"
+// (CK_RenderKey). With Keep Original on and Matte Gamma 0.5-1, every output
+// mode except Foreground matches the full key to within 0.1%.
 // Returns the number of pixels removed.
 size_t CK_CompactFg(std::vector<float>& rgb, const std::vector<float>& alpha,
                     int width, int height, int border);

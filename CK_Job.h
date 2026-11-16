@@ -13,9 +13,10 @@
 //   hint_frames\hint_000000.png ...  per-frame hint (Hint Layer > Every Frame)
 //   frames\ ...   trimmed source frames (removed when the key finishes)
 //   compact.flag   Compact Keys was on: compact the fg once the key is done
-//   compact2.txt   next fg frame to compact (resume point)
-//   compact2.done  every fg frame has been compacted (edges-only fg, v1.0).
-//                  v0.15's compact.txt/.done are ignored, so those keys are
+//   compact3.txt   next fg frame to compact (resume point)
+//   compact3.done  every fg frame has been compacted (edges-only fg with
+//                  noise/solid thresholds, v1.1). Older compact.* and
+//                  compact2.* markers are ignored, so those keys are
 //                  compacted again the new way.
 
 #include <string>
@@ -133,7 +134,7 @@ std::string CK_ResolveJobDir(const std::string& stored);
 // frame with the unused background cleared (CK_CompactFgFile). Started from
 // CK_QueryJob, so keys that finished while AE was closed are picked up too.
 
-// Queues a done key if it has compact.flag and no compact2.done.
+// Queues a done key if it has compact.flag and no compact3.done.
 void CK_RequestCompact(const std::string& job_dir);
 // Drops job_dir from the queue; if it's being compacted, stops and waits.
 void CK_CancelCompact(const std::string& job_dir);

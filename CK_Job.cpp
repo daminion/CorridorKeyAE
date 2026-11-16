@@ -233,8 +233,10 @@ bool CK_StartJob(const std::string& job_dir,
     CK_CancelCompact(job_dir);
     CK_RemoveFile(job_dir + "\\compact.txt");      // v0.15 markers
     CK_RemoveFile(job_dir + "\\compact.done");
-    CK_RemoveFile(job_dir + "\\compact2.txt");
+    CK_RemoveFile(job_dir + "\\compact2.txt");     // v1.0 markers
     CK_RemoveFile(job_dir + "\\compact2.done");
+    CK_RemoveFile(job_dir + "\\compact3.txt");
+    CK_RemoveFile(job_dir + "\\compact3.done");
     if (req.compact)
         CK_WriteTextFile(job_dir + "\\compact.flag", "");
     else
@@ -503,7 +505,7 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
         if (CK_FileExists(job_dir + "\\done.flag"))
         {
             st.state = CK_JOB_DONE;
-            st.compacted = CK_FileExists(job_dir + "\\compact2.done");
+            st.compacted = CK_FileExists(job_dir + "\\compact3.done");
             if (!st.compacted)
                 CK_RequestCompact(job_dir);
         }
@@ -689,7 +691,7 @@ namespace
         if (fg_dir.empty() || al_dir.empty())
             return;
         const int total = CK_CountExrInSubdir(dir, "_fg_exr");
-        int i = std::atoi(CK_ReadTextFile(dir + "\\compact2.txt").c_str());
+        int i = std::atoi(CK_ReadTextFile(dir + "\\compact3.txt").c_str());
         if (i < 0 || i > total) i = 0;
         {
             std::lock_guard<std::mutex> lock(g_cmp_mutex);
@@ -728,15 +730,15 @@ namespace
             else
                 CK_RemoveFile(tmp);
 
-            CK_WriteTextFile(dir + "\\compact2.txt", std::to_string(i + 1));
+            CK_WriteTextFile(dir + "\\compact3.txt", std::to_string(i + 1));
             std::lock_guard<std::mutex> lock(g_cmp_mutex);
             g_cmp_done = i + 1;
             ++g_cmp_version;
         }
         if (!Stopping())
         {
-            CK_WriteTextFile(dir + "\\compact2.done", "");
-            CK_RemoveFile(dir + "\\compact2.txt");
+            CK_WriteTextFile(dir + "\\compact3.done", "");
+            CK_RemoveFile(dir + "\\compact3.txt");
         }
     }
 
@@ -770,7 +772,7 @@ namespace
 
 void CK_RequestCompact(const std::string& job_dir)
 {
-    if (!CK_FileExists(job_dir + "\\compact.flag") || CK_FileExists(job_dir + "\\compact2.done"))
+    if (!CK_FileExists(job_dir + "\\compact.flag") || CK_FileExists(job_dir + "\\compact3.done"))
         return;
     std::lock_guard<std::mutex> lock(g_cmp_mutex);
     if (g_cmp_quit || g_cmp_active == job_dir)
