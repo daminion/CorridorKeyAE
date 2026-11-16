@@ -1,6 +1,7 @@
 #include "CK_Job.h"
 #include "CK_Platform.h"
 #include "CK_Frames.h"
+#include "CK_InferScript.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -177,6 +178,11 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
     {
         std::snprintf(settings, sizeof(settings), "|rend=%016llx|lin=%d",
                       req.render_hash, req.rendered_linear ? 1 : 0);
+        key += settings;
+    }
+    if (req.model_scale < 0.999f)
+    {
+        std::snprintf(settings, sizeof(settings), "|ms=%.3f", req.model_scale);
         key += settings;
     }
     if (!req.compact)
@@ -392,7 +398,26 @@ bool CK_StartJob(const std::string& job_dir,
 
     // Done/failed flags are written by cmd.exe itself, so they appear even
     // if After Effects has been closed in the meantime.
-    std::string infer = Quote(python_exe) + " " + Quote(corridorkey_dir + "\\infer.py") + args;
+    std::string infer_py = corridorkey_dir + "\\infer.py";
+    if (req.model_scale < 0.999f)
+    {
+        // Draft: CorridorKey's --model_scale needs our wrapper for its output
+        // upscale (tools/ck_infer_scaled.py). It runs infer.py unchanged.
+        const std::string wrapper = CK_LocalAppDataDir() + "\\ck_infer_scaled.py";
+        if (!CK_MakeDirs(CK_LocalAppDataDir()) || !CK_WriteTextFile(wrapper, kCK_InferScript))
+        {
+            error = "Couldn't write the draft-key helper to:\n  " + wrapper;
+            return false;
+        }
+        infer_py = wrapper;
+        std::snprintf(num, sizeof(num), " --model_scale %.3f", req.model_scale);
+        args += num;
+        std::snprintf(num, sizeof(num), "%.3f", req.model_scale);
+        CK_WriteTextFile(job_dir + "\\scale.txt", num);
+    }
+    else
+        CK_RemoveFile(job_dir + "\\scale.txt");
+    std::string infer = Quote(python_exe) + " " + Quote(infer_py) + args;
 
     std::string cmd;
     cmd += "set PYTHONUNBUFFERED=1&& (";
@@ -501,6 +526,9 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
     else
     {
         st.frames_done = CK_CountExrInSubdir(job_dir, "_fg_exr");
+        const double ms = std::atof(CK_ReadTextFile(job_dir + "\\scale.txt").c_str());
+        if (ms > 0.0 && ms < 0.999)
+            st.model_scale = (float)ms;
 
         if (CK_FileExists(job_dir + "\\done.flag"))
         {
@@ -586,6 +614,14 @@ std::string CK_StatusText(const CK_JobStatus& st, int frames_total)
         default:
             std::snprintf(buf, sizeof(buf), "Not keyed - click Key Clip");
             break;
+    }
+    // Draft keys say so, so they aren't mistaken for the final key.
+    if (st.model_scale < 0.999f &&
+        (st.state == CK_JOB_RUNNING || st.state == CK_JOB_DONE))
+    {
+        char tag[32];
+        std::snprintf(tag, sizeof(tag), "[draft %d%%] ", (int)(st.model_scale * 100.0f + 0.5f));
+        return std::string(tag) + buf;
     }
     return buf;
 }

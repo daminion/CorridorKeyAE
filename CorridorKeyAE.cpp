@@ -514,6 +514,16 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER(STR(StrID_Handles_Name), 0, 200, 0, 48, 8, HANDLES_DISK_ID);
 
+    // Draft keys: CorridorKey works on a shrunk copy and its result is scaled
+    // back up, so the key folder is still full resolution.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_KeyRes_Name),
+                  CK_KR_NUM,
+                  CK_KR_FULL,
+                  STR(StrID_KeyRes_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  KEY_RES_DISK_ID);
+
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX(STR(StrID_Temporal_Name),
                   CK_TW_NUM,
@@ -1273,6 +1283,13 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     req.exact_hint = params[CK_EXACT_HINT]->u.bd.value != 0;
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
     req.compact = params[CK_COMPACT_KEYS]->u.bd.value != 0;
+    switch (params[CK_KEY_RES]->u.pd.value)
+    {
+        case CK_KR_75: req.model_scale = 0.75f; break;
+        case CK_KR_50: req.model_scale = 0.5f;  break;
+        case CK_KR_25: req.model_scale = 0.25f; break;
+        default:       req.model_scale = 1.0f;  break;
+    }
     switch (params[CK_TEMPORAL]->u.pd.value)
     {
         case CK_TW_80: req.temporal_chunk = 80; break;

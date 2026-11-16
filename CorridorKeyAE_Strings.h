@@ -39,6 +39,8 @@ typedef enum {
     StrID_HintSource_Choices,
     StrID_CarryQuality_Name,
     StrID_ExactHint_Name,
+    StrID_KeyRes_Name,
+    StrID_KeyRes_Choices,
     StrID_Temporal_Name,
     StrID_Temporal_Choices,
     StrID_HintLayer_Name,

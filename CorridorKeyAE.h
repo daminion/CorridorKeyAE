@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 1
-#define MINOR_VERSION 1
+#define MINOR_VERSION 2
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -81,6 +81,7 @@ enum
     CK_KEY_SOURCE,
     CK_KEY_RANGE,
     CK_HANDLES,
+    CK_KEY_RES,             // Key Resolution: draft keys at reduced model scale (v1.2)
     CK_TEMPORAL,
     CK_LOW_VRAM,
     CK_RANGE_END,
@@ -138,7 +139,19 @@ enum
     // v0.14
     CACHE_LOCATION_DISK_ID,
     // v0.15
-    COMPACT_KEYS_DISK_ID
+    COMPACT_KEYS_DISK_ID,
+    // v1.2
+    KEY_RES_DISK_ID
+};
+
+// Key Resolution popup (CorridorKey --model_scale)
+enum
+{
+    CK_KR_FULL = 1,
+    CK_KR_75,
+    CK_KR_50,
+    CK_KR_25,
+    CK_KR_NUM = CK_KR_25
 };
 
 // Cache Location popup: where Key Clip writes new keys

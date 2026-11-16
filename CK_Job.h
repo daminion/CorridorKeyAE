@@ -12,6 +12,7 @@
 //   hint_frame0.png  first-frame hint (Hint Mask, or Hint Layer > First Frame)
 //   hint_frames\hint_000000.png ...  per-frame hint (Hint Layer > Every Frame)
 //   frames\ ...   trimmed source frames (removed when the key finishes)
+//   scale.txt      Key Resolution below Full: the --model_scale used
 //   compact.flag   Compact Keys was on: compact the fg once the key is done
 //   compact3.txt   next fg frame to compact (resume point)
 //   compact3.done  every fg frame has been compacted (edges-only fg with
@@ -48,6 +49,7 @@ struct CK_JobRequest
     std::string prerendered_dir;             // moved into <job>\frames by CK_StartJob
 
     bool        compact = true;              // Compact Keys (off = full-size fg, own key id)
+    float       model_scale = 1.0f;          // Key Resolution: < 1 keys a shrunk copy (draft)
 };
 
 enum CK_JobState
@@ -79,7 +81,8 @@ struct CK_JobStatus
     int windows_done = 0;
     int windows_total = 0;
     long elapsed_s = -1;    // since the job started (-1 = unknown)
-    bool compacted = false; // done keys: Compact Keys has finished (compact2.done)
+    bool compacted = false; // done keys: Compact Keys has finished (compact3.done)
+    float model_scale = 1.0f; // from scale.txt: < 1 = draft key
 };
 
 // <cache_root>\<clip>_<8 hex>. Hash covers the source file identity and the
