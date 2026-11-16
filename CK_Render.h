@@ -37,7 +37,8 @@ struct CK_RenderSettings
     int   method = CK_DESPILL_AVERAGE;        // Green/Blue only; Picked always averages
     int   despeckle_px = 0;    // remove matte islands smaller than this many full-res pixels
     bool  keep_original = false;   // plate colour where the matte is solid
-    const float* plate = nullptr;  // linear RGB, width*height*3 in OUTPUT pixels (for keep_original)
+    const float* plate = nullptr;  // linear RGB, width*height*3 in OUTPUT pixels
+                                   // (Keep Original, and compacted fg pixels)
     float choke_px = 0.0f;     // full-res pixels; + shrinks, - grows
     float gamma = 1.0f;        // matte gamma; > 1 makes soft edges more opaque
     bool  srgb_out = true;     // encode linear results to sRGB for a non-linear project

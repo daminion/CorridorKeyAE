@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <list>
 #include <map>
 #include <mutex>
@@ -173,12 +174,15 @@ bool CK_LoadFramePair(const std::string& fg_path,
     out.height = fh;
     const size_t n = (size_t)fw * (size_t)fh;
     out.rgb.resize(n * 3);
+    bool sparse = false;
     for (size_t i = 0; i < n; ++i)
     {
         out.rgb[i * 3 + 0] = fc[r][i];
         out.rgb[i * 3 + 1] = fc[g][i];
         out.rgb[i * 3 + 2] = fc[b][i];
+        sparse = sparse || CK_IsMissing(fc[r][i]);
     }
+    out.sparse = sparse;
     out.alpha.swap(ac[a]);
     return true;
 }
@@ -264,50 +268,69 @@ std::shared_ptr<const CK_Frame> CK_GetKeyedFrame(const std::string& job_dir,
 // Compact Keys
 // ---------------------------------------------------------------------------
 
-size_t CK_ClearUnusedFg(std::vector<float>& rgb, const std::vector<float>& alpha,
-                        int width, int height, int border)
+namespace
 {
-    const int w = width, h = height, r = border < 0 ? 0 : border;
-    if (w <= 0 || h <= 0 || alpha.size() < (size_t)w * h || rgb.size() < (size_t)w * h * 3)
-        return 0;
-
-    // Pass 1 (rows): hasMatte[i] = some alpha > 0 within r pixels horizontally.
-    std::vector<unsigned char> hasMatte((size_t)w * h, 0);
-    for (int y = 0; y < h; ++y)
+    // out[i] = 1 if mask is set anywhere within r pixels of i (square).
+    void Dilate(const std::vector<unsigned char>& mask, std::vector<unsigned char>& out,
+                int w, int h, int r)
     {
-        const float* a = alpha.data() + (size_t)y * w;
-        unsigned char* n = hasMatte.data() + (size_t)y * w;
-        int count = 0;
-        for (int x = 0; x < r && x < w; ++x)          // prime the window [x - r, x + r]
-            count += a[x] > 0.0f;
-        for (int x = 0; x < w; ++x)
-        {
-            if (x + r < w) count += a[x + r] > 0.0f;
-            if (x - r - 1 >= 0) count -= a[x - r - 1] > 0.0f;
-            n[x] = count > 0;
-        }
-    }
-
-    // Pass 2 (columns) on the row result, clearing as it goes.
-    size_t cleared = 0;
-    for (int x = 0; x < w; ++x)
-    {
-        int count = 0;
-        for (int y = 0; y < r && y < h; ++y)
-            count += hasMatte[(size_t)y * w + x];
+        std::vector<unsigned char> rows((size_t)w * h, 0);
         for (int y = 0; y < h; ++y)
         {
-            if (y + r < h) count += hasMatte[(size_t)(y + r) * w + x];
-            if (y - r - 1 >= 0) count -= hasMatte[(size_t)(y - r - 1) * w + x];
-            if (count == 0)
+            const unsigned char* m = mask.data() + (size_t)y * w;
+            unsigned char* o = rows.data() + (size_t)y * w;
+            int count = 0;
+            for (int x = 0; x < r && x < w; ++x)        // prime the window [x - r, x + r]
+                count += m[x];
+            for (int x = 0; x < w; ++x)
             {
-                float* p = rgb.data() + ((size_t)y * w + x) * 3;
-                p[0] = p[1] = p[2] = 0.0f;
-                ++cleared;
+                if (x + r < w) count += m[x + r];
+                if (x - r - 1 >= 0) count -= m[x - r - 1];
+                o[x] = count > 0;
+            }
+        }
+        out.assign((size_t)w * h, 0);
+        for (int x = 0; x < w; ++x)
+        {
+            int count = 0;
+            for (int y = 0; y < r && y < h; ++y)
+                count += rows[(size_t)y * w + x];
+            for (int y = 0; y < h; ++y)
+            {
+                if (y + r < h) count += rows[(size_t)(y + r) * w + x];
+                if (y - r - 1 >= 0) count -= rows[(size_t)(y - r - 1) * w + x];
+                out[(size_t)y * w + x] = count > 0;
             }
         }
     }
-    return cleared;
+}
+
+size_t CK_CompactFg(std::vector<float>& rgb, const std::vector<float>& alpha,
+                    int width, int height, int border)
+{
+    const int w = width, h = height, r = border < 0 ? 0 : border;
+    const size_t n = (size_t)w * h;
+    if (w <= 0 || h <= 0 || alpha.size() < n || rgb.size() < n * 3)
+        return 0;
+
+    std::vector<unsigned char> nonzero(n), soft(n), near_nonzero, near_soft;
+    for (size_t i = 0; i < n; ++i)
+    {
+        nonzero[i] = alpha[i] > 0.0f;
+        soft[i] = alpha[i] < CK_COMPACT_SOLID;
+    }
+    Dilate(nonzero, near_nonzero, w, h, r);
+    Dilate(soft, near_soft, w, h, r);
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    size_t removed = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (!(near_nonzero[i] && near_soft[i]))
+        {
+            rgb[i * 3 + 0] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = nan;
+            ++removed;
+        }
+    return removed;
 }
 
 bool CK_CompactFgFile(const std::string& fg_path, const std::string& alpha_path,
@@ -316,6 +339,6 @@ bool CK_CompactFgFile(const std::string& fg_path, const std::string& alpha_path,
     CK_Frame f;
     if (!CK_LoadFramePair(fg_path, alpha_path, f, error))
         return false;
-    CK_ClearUnusedFg(f.rgb, f.alpha, f.width, f.height, CK_COMPACT_BORDER);
+    CK_CompactFg(f.rgb, f.alpha, f.width, f.height, CK_COMPACT_BORDER);
     return CK_WriteExrRGB(out_path, f.width, f.height, f.rgb.data(), error, true);
 }

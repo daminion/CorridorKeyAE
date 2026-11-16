@@ -2,6 +2,8 @@
 
 // Loading CorridorKey's cached EXR results.
 
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,7 +14,16 @@ struct CK_Frame
     int height = 0;
     std::vector<float> rgb;    // linear RGB, 3 floats per pixel, row 0 = top
     std::vector<float> alpha;  // 1 float per pixel
+    bool sparse = false;       // some fg pixels are NaN (compacted away): use the plate there
 };
+
+// A compacted-away fg value (NaN). Bit test, so /fp:fast can't optimise it out.
+inline bool CK_IsMissing(float v)
+{
+    std::uint32_t b;
+    std::memcpy(&b, &v, sizeof(b));
+    return (b & 0x7f800000u) == 0x7f800000u && (b & 0x007fffffu) != 0;
+}
 
 // Reads an EXR into named float channels. Portable (tinyexr), no AE deps.
 bool CK_ReadExr(const std::string& path,
@@ -29,18 +40,25 @@ bool CK_WriteExrRGB(const std::string& path, int width, int height,
 
 // ---- Compact Keys -------------------------------------------------------
 
-// Pixels CK_ClearUnusedFg keeps around the matte: Matte Choke can grow it by
-// up to 50 px, and the grown edge shows the fg colour underneath.
-#define CK_COMPACT_BORDER 51
+// Matte Choke's slider is limited to +/-20 px, and the processed matte at a
+// pixel only depends on the original alpha within choke + 1 pixels of it.
+// Keep this at least (largest choke) + 1 if the slider range ever grows.
+#define CK_COMPACT_BORDER 21
 
-// Sets the fg colour to black wherever no alpha > 0 lies within `border`
-// pixels (square neighbourhood). Those pixels are invisible in every output
-// mode except Foreground. Returns the number of pixels cleared.
-size_t CK_ClearUnusedFg(std::vector<float>& rgb, const std::vector<float>& alpha,
-                        int width, int height, int border);
+// Alpha at or above this counts as solid. Even at the lowest Matte Gamma
+// (0.1, i.e. a^10) it stays >= 0.98, where Keep Original shows only the plate.
+#define CK_COMPACT_SOLID 0.999f
 
-// Reads a fg/alpha pair, clears the unused fg and writes the result to
-// out_path as a half-float PIZ EXR. Lossless for every visible pixel.
+// Keeps CorridorKey's fg only where it can show: pixels with both a non-zero
+// and a non-solid alpha within `border` pixels (square). Everywhere else the
+// fg is set to NaN, meaning "use the plate" (CK_RenderKey). With Keep
+// Original on, every output mode except Foreground is unchanged.
+// Returns the number of pixels removed.
+size_t CK_CompactFg(std::vector<float>& rgb, const std::vector<float>& alpha,
+                    int width, int height, int border);
+
+// Reads a fg/alpha pair, runs CK_CompactFg and writes the result to
+// out_path as a half-float PIZ EXR.
 bool CK_CompactFgFile(const std::string& fg_path, const std::string& alpha_path,
                       const std::string& out_path, std::string& error);
 

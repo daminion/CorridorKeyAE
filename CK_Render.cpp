@@ -205,6 +205,19 @@ void CK_RenderKey(const CK_Frame& frame,
             float b = frame.rgb[i * 3 + 2];
             float a = matte[i];
 
+            // Compact Keys removed this fg pixel (solid or far from the
+            // matte): the plate stands in, as Keep Original would show.
+            if (CK_IsMissing(r))
+            {
+                if (s.plate)
+                {
+                    const float* p = s.plate + ((size_t)y * width + x) * 3;
+                    r = p[0]; g = p[1]; b = p[2];
+                }
+                else
+                    r = g = b = 0.0f;
+            }
+
             // Keep Original: in solid areas use the plate's own colour (grain,
             // texture, full detail); fades in from alpha 0.90 to 0.98.
             if (s.keep_original && s.plate && s.mode != CK_MODE_ALPHA)

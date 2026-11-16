@@ -1608,6 +1608,7 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                 A_long available;
                 A_long preview_token;
                 A_long preview_state;     // only at the clicked frame
+                A_long compacted;         // Compact Keys finished: solid areas now come from the plate
             } mix;
             std::memset(&mix, 0, sizeof(mix));
             std::memcpy(mix.job, data.job_dir, CK_PATH_MAX);
@@ -1625,6 +1626,7 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                 const int index = CacheIndexFor(in_data, data);
                 CK_JobStatus st = CK_QueryJob(data.job_dir);
                 // While running, the newest file may still be mid-write.
+                mix.compacted = st.compacted ? 1 : 0;
                 mix.available = (st.state == CK_JOB_DONE) ||
                                 (st.state == CK_JOB_RUNNING && index >= 0 &&
                                  index < st.frames_done - 1);
@@ -1873,10 +1875,11 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
                 s.scale_y = sy;
             }
 
-            // Keep Original needs the plate in linear RGB, pixel-aligned with
-            // the output (same result rect, so same size).
+            // Keep Original and compacted keys need the plate in linear RGB,
+            // pixel-aligned with the output (same result rect, so same size).
             std::vector<float> plate;
-            if (s.keep_original && inW->width == outW->width && inW->height == outW->height)
+            if ((s.keep_original || frame->sparse) &&
+                inW->width == outW->width && inW->height == outW->height)
             {
                 ReadWorldRGB(inW, fmt, s.srgb_out, true, plate);
                 s.plate = plate.data();
