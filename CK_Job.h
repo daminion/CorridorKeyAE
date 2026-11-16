@@ -165,5 +165,9 @@ unsigned long CK_CompactVersion();
 // Stops the worker (GLOBAL_SETDOWN). Waits for the current frame.
 void CK_StopCompactor();
 
+// TEMPORARY (v1.4 stale-frame hunt): appends a line to
+// %LOCALAPPDATA%\CorridorKeyAE\render_log.txt (capped at ~2 MB).
+void CK_DebugLog(const char* fmt, ...);
+
 // One-line text for the Status control.
 std::string CK_StatusText(const CK_JobStatus& st, int frames_total);

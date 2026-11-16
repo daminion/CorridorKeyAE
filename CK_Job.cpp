@@ -9,6 +9,7 @@
 #include <thread>
 
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -891,4 +892,28 @@ void CK_StopCompactor()
     g_cmp_cv.notify_all();
     if (g_cmp_thread.t.joinable())
         g_cmp_thread.t.join();
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY debug log
+// ---------------------------------------------------------------------------
+
+void CK_DebugLog(const char* fmt, ...)
+{
+    static std::mutex m;
+    char line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+
+    std::lock_guard<std::mutex> lock(m);
+    const std::string path = CK_LocalAppDataDir() + "\\render_log.txt";
+    std::FILE* f = std::fopen(path.c_str(), "ab");
+    if (!f)
+        return;
+    std::fseek(f, 0, SEEK_END);
+    if (std::ftell(f) < 2 * 1024 * 1024)
+        std::fprintf(f, "%lu %s\r\n", CK_TickMs(), line);
+    std::fclose(f);
 }
