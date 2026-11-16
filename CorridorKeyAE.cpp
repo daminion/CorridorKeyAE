@@ -1217,7 +1217,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
         CK_ShowMessage(title,
             "CorridorKey isn't set up yet.\n\n"
             "Run tools\\CorridorKey_Setup.bat from the CorridorKeyAE folder,\n"
-            "or set corridorkey_dir in Global Settings.\n\n"
+            "or set the CorridorKey folder in the setup menu (tools\\CorridorKey_Setup.bat).\n\n"
             "Settings file:\n  " + gs.settings_file);
         return err;
     }

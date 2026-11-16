@@ -66,6 +66,14 @@ function Write-Check([string]$label, [bool]$ok, [string]$detail) {
 
 # ---------------------------------------------------------------- actions ---
 
+function Do-OpenSettings {
+    if (-not (Test-Path $SettingsFile)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $SettingsFile) | Out-Null
+        Set-Content -Path $SettingsFile -Value "[paths]`r`ncorridorkey_dir=`r`npython=`r`ncache_root=`r`nffmpeg=" -Encoding ASCII
+    }
+    Start-Process notepad.exe -ArgumentList "`"$SettingsFile`""
+}
+
 function Show-Status {
     $dir = Get-InstallDir
     $vpy = Get-VenvPython $dir
@@ -172,7 +180,7 @@ function Do-Cache {
     $new = Read-Host 'New default cache folder (blank = built-in default)'
     $new = $new.Trim().Trim('"').TrimEnd('\')
     Set-Setting 'cache_root' $new
-    Write-Host 'Saved. Effects with their own Cache Folder override keep using theirs.' -ForegroundColor Green
+    Write-Host 'Saved. Used by effects set to Global Cache, unsaved projects and Preview Frame.' -ForegroundColor Green
 }
 
 function Get-CacheRoot {
@@ -314,6 +322,7 @@ while ($true) {
     Write-Host '  5  Test-key a clip outside AE'
     Write-Host '  6  Set default cache folder'
     Write-Host '  7  Manage cached keys'
+    Write-Host '  8  Open settings file (python, ffmpeg, paths)'
     Write-Host '  Q  Quit'
     Write-Host ''
     $c = (Read-Host 'Choose').Trim().ToUpper()
@@ -326,6 +335,7 @@ while ($true) {
             '5' { Do-Test;     Pause-Menu }
             '6' { Do-Cache;    Pause-Menu }
             '7' { Do-ManageCache; Pause-Menu }
+            '8' { Do-OpenSettings }
             'Q' { return }
         }
     } catch {

@@ -49,7 +49,7 @@ The build output goes to `%AE_PLUGIN_BUILD_DIR%`, same as Better Feather.
 
 ## Settings
 
-Global: `%APPDATA%\CorridorKeyAE\settings.ini`. It's created on first use; open it from the effect with **Cache > Global Settings > Open...**.
+Global: `%APPDATA%\CorridorKeyAE\settings.ini`. It's created on first use and edited through the setup menu (`tools\CorridorKey_Setup.bat`).
 
 | key | meaning |
 |---|---|
@@ -57,9 +57,9 @@ Global: `%APPDATA%\CorridorKeyAE\settings.ini`. It's created on first use; open 
 | `python` | optional; blank = `<corridorkey_dir>\venv\Scripts\python.exe` |
 | `cache_root` | default cache folder; blank = `%LOCALAPPDATA%\CorridorKeyAE\Cache` |
 
-Per effect: **Cache > Cache Folder > Choose...** overrides the cache folder for that one effect and is saved with the project. **Reset** goes back to the global default.
+Per effect: **Cache > Save Keys In** = Project Folder (default, `CorridorKeys` next to the .aep), Global Cache (`cache_root`), or Custom Folder (**Choose...**, saved with the project).
 
-Branches: `dev` is active development. Backup branches are `backup/<name>`.
+Branches: `dev` is active development. Backup branches are `backup/<name>`. Developer notes and handoff: [HANDOFF.md](HANDOFF.md).
 
 ## Third-party code
 

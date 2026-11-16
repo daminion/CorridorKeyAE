@@ -105,7 +105,7 @@ bool CK_PreviewStart(const CK_GlobalSettings& gs, std::string& error)
     unsigned long pid = 0;
     if (!CK_LaunchHidden(cmd, gs.corridorkey_dir, &pid))
     {
-        error = "Couldn't start the preview helper. Check the python path in Global Settings.";
+        error = "Couldn't start the preview helper. Check the python path in the setup menu (tools\\CorridorKey_Setup.bat).";
         return false;
     }
     char num[32];

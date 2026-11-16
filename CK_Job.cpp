@@ -287,7 +287,7 @@ bool CK_StartJob(const std::string& job_dir,
             if (ffmpeg_exe.empty())
             {
                 error = "ffmpeg wasn't found, so the clip can't be trimmed to the layer's in/out.\n\n"
-                        "Set Key Range > Range to Whole Clip, or set ffmpeg in Global Settings.";
+                        "Set Key Range > Range to Whole Clip, or set the ffmpeg path in the setup menu.";
                 return false;
             }
             // Seek half a frame early so the first decoded frame is exactly start_frame.
@@ -369,7 +369,7 @@ bool CK_StartJob(const std::string& job_dir,
     unsigned long pid = 0;
     if (!CK_LaunchHidden(cmd, corridorkey_dir, &pid))
     {
-        error = "Couldn't start CorridorKey. Check the python path in Global Settings.";
+        error = "Couldn't start CorridorKey. Check the python path in the setup menu (tools\\CorridorKey_Setup.bat).";
         return false;
     }
 

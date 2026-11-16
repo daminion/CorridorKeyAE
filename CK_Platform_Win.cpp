@@ -103,7 +103,7 @@ CK_GlobalSettings CK_LoadGlobalSettings()
             "\r\n"
             "; Default cache folder for keyed results, e.g. a fast external drive.\r\n"
             "; Blank = %LOCALAPPDATA%\\CorridorKeyAE\\Cache\r\n"
-            "; Each effect can override this with Cache > Cache Folder > Choose...\r\n"
+            "; Used by effects set to Save Keys In: Global Cache, unsaved projects, and Preview Frame.\r\n"
             "cache_root=\r\n"
             "\r\n"
             "; Optional. Blank = ffmpeg from PATH (used to trim movies to the layer's in/out)\r\n"
