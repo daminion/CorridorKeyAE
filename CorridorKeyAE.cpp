@@ -781,7 +781,7 @@ static bool GetLayerSource(PF_InData* in_data, A_long key_source,
     if (req.rendered)
     {
         // No file: name the key after the project item.
-        AEGP_ItemID id = 0;
+        A_long id = 0;
         suites.ItemSuite9()->AEGP_GetItemID(itemH, &id);
         char name[64];
         std::snprintf(name, sizeof(name), "rendered_item_%d", (int)id);
