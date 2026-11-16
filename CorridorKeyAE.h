@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 14
+#define MINOR_VERSION 15
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -88,6 +88,7 @@ enum
     CK_CACHE_START,
     CK_CACHE_LOCATION,
     CK_CHOOSE_CACHE,        // shown as "Custom Folder"
+    CK_COMPACT_KEYS,        // clear unused fg background once keyed (v0.15)
     CK_CACHE_END,
     CK_NUM_PARAMS
 };
@@ -135,7 +136,9 @@ enum
     PREVIEW_FRAME_DISK_ID,
     KEY_SOURCE_DISK_ID,
     // v0.14
-    CACHE_LOCATION_DISK_ID
+    CACHE_LOCATION_DISK_ID,
+    // v0.15
+    COMPACT_KEYS_DISK_ID
 };
 
 // Cache Location popup: where Key Clip writes new keys

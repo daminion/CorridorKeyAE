@@ -12,6 +12,9 @@
 //   hint_frame0.png  first-frame hint (Hint Mask, or Hint Layer > First Frame)
 //   hint_frames\hint_000000.png ...  per-frame hint (Hint Layer > Every Frame)
 //   frames\ ...   trimmed source frames (removed when the key finishes)
+//   compact.flag  Compact Keys was on: clear unused fg once the key is done
+//   compact.txt   next fg frame to compact (resume point)
+//   compact.done  every fg frame has been compacted
 
 #include <string>
 #include <vector>
@@ -40,6 +43,8 @@ struct CK_JobRequest
     bool        rendered_linear = false;     // EXRs hold scene-linear values
     unsigned long long render_hash = 0;      // fingerprint of the rendered pixels
     std::string prerendered_dir;             // moved into <job>\frames by CK_StartJob
+
+    bool        compact = true;              // Compact Keys (off = full-size fg, own key id)
 };
 
 enum CK_JobState
@@ -119,6 +124,29 @@ std::string CK_GetProjectDir();
 // the same key next to the open project when that copy exists (the project
 // was moved, copied or archived). Anything else is returned unchanged.
 std::string CK_ResolveJobDir(const std::string& stored);
+
+// ---- Compact Keys -------------------------------------------------------
+// Once a key with compact.flag is done, a background thread rewrites each fg
+// frame with the unused background cleared (CK_CompactFgFile). Started from
+// CK_QueryJob, so keys that finished while AE was closed are picked up too.
+
+// Queues a done key if it has compact.flag and no compact.done.
+void CK_RequestCompact(const std::string& job_dir);
+// Drops job_dir from the queue; if it's being compacted, stops and waits.
+void CK_CancelCompact(const std::string& job_dir);
+
+// Marks a finished key for compacting (Key Clip reusing an existing key).
+void CK_EnableCompact(const std::string& job_dir);
+
+// True while job_dir is queued or being compacted; done/total are frames
+// (total = 0 while queued).
+bool CK_CompactProgress(const std::string& job_dir, int& done, int& total);
+
+// Bumps whenever compacting progresses (time to redraw the Status line).
+unsigned long CK_CompactVersion();
+
+// Stops the worker (GLOBAL_SETDOWN). Waits for the current frame.
+void CK_StopCompactor();
 
 // One-line text for the Status control.
 std::string CK_StatusText(const CK_JobStatus& st, int frames_total);

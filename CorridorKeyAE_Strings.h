@@ -32,6 +32,7 @@ typedef enum {
     StrID_CacheLocation_Choices,
     StrID_ChooseCache_Name,
     StrID_ChooseCache_Button,
+    StrID_CompactKeys_Name,
     StrID_Status_Name,
     StrID_HintGroup_Name,
     StrID_HintSource_Name,

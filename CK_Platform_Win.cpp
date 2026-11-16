@@ -507,6 +507,12 @@ std::string CK_ResolveFfmpegExe(const CK_GlobalSettings& gs)
 
 // ---- v0.11: preview helper + rendered key source ----------------------
 
+bool CK_ReplaceFile(const std::string& src_utf8, const std::string& dst_utf8)
+{
+    return MoveFileExW(Widen(src_utf8).c_str(), Widen(dst_utf8).c_str(),
+                       MOVEFILE_REPLACE_EXISTING) != 0;
+}
+
 bool CK_MoveDir(const std::string& src_utf8, const std::string& dst_utf8)
 {
     return MoveFileExW(Widen(src_utf8).c_str(), Widen(dst_utf8).c_str(),

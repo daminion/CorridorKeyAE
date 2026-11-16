@@ -36,6 +36,16 @@ namespace
         info.state = st.state;
         info.colour = st.state;
         info.text = CK_StatusText(st, data.frames_total);
+        int cdone = 0, ctotal = 0;
+        if (st.state == CK_JOB_DONE && CK_CompactProgress(info.key, cdone, ctotal))
+        {
+            char cbuf[64];
+            if (ctotal > 0)
+                std::snprintf(cbuf, sizeof(cbuf), " - compacting %d/%d", cdone, ctotal);
+            else
+                std::snprintf(cbuf, sizeof(cbuf), " - compacting...");
+            info.text += cbuf;
+        }
 
         // Until a key is finished, show this effect's last Preview Frame click.
         if (data.preview_token > 0 && st.state != CK_JOB_RUNNING && st.state != CK_JOB_DONE)

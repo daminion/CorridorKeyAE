@@ -91,6 +91,9 @@ std::string CK_FromUtf16(const unsigned short* s);
 // ---- v0.11: preview helper + rendered key source ----------------------
 
 // Rename/move a folder (same drive is instant). False on failure.
+// Replaces dst with src (same folder). Fails while dst is open elsewhere.
+bool CK_ReplaceFile(const std::string& src_utf8, const std::string& dst_utf8);
+
 bool CK_MoveDir(const std::string& src_utf8, const std::string& dst_utf8);
 
 // Deletes a folder and everything in it. True if it's gone afterwards.

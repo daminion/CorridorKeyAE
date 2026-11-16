@@ -82,7 +82,7 @@ bool CK_ReadExr(const std::string& path,
 }
 
 bool CK_WriteExrRGB(const std::string& path, int width, int height,
-                    const float* rgb, std::string& error)
+                    const float* rgb, std::string& error, bool piz)
 {
     const size_t n = (size_t)width * height;
     std::vector<float> b(n), g(n), r(n);
@@ -115,7 +115,7 @@ bool CK_WriteExrRGB(const std::string& path, int width, int height,
     header.channels = channels;
     header.pixel_types = pixel_types;
     header.requested_pixel_types = requested;
-    header.compression_type = TINYEXR_COMPRESSIONTYPE_ZIP;
+    header.compression_type = piz ? TINYEXR_COMPRESSIONTYPE_PIZ : TINYEXR_COMPRESSIONTYPE_ZIP;
 
     const char* msg = NULL;
     const int rc = SaveEXRImageToFile(&image, &header, path.c_str(), &msg);
@@ -258,4 +258,64 @@ std::shared_ptr<const CK_Frame> CK_GetKeyedFrame(const std::string& job_dir,
     g_frames[key] = frame;
     Touch(key);
     return frame;
+}
+
+// ---------------------------------------------------------------------------
+// Compact Keys
+// ---------------------------------------------------------------------------
+
+size_t CK_ClearUnusedFg(std::vector<float>& rgb, const std::vector<float>& alpha,
+                        int width, int height, int border)
+{
+    const int w = width, h = height, r = border < 0 ? 0 : border;
+    if (w <= 0 || h <= 0 || alpha.size() < (size_t)w * h || rgb.size() < (size_t)w * h * 3)
+        return 0;
+
+    // Pass 1 (rows): near[i] = some alpha > 0 within r pixels horizontally.
+    std::vector<unsigned char> near((size_t)w * h, 0);
+    for (int y = 0; y < h; ++y)
+    {
+        const float* a = alpha.data() + (size_t)y * w;
+        unsigned char* n = near.data() + (size_t)y * w;
+        int count = 0;
+        for (int x = 0; x < r && x < w; ++x)          // prime the window [x - r, x + r]
+            count += a[x] > 0.0f;
+        for (int x = 0; x < w; ++x)
+        {
+            if (x + r < w) count += a[x + r] > 0.0f;
+            if (x - r - 1 >= 0) count -= a[x - r - 1] > 0.0f;
+            n[x] = count > 0;
+        }
+    }
+
+    // Pass 2 (columns) on the row result, clearing as it goes.
+    size_t cleared = 0;
+    for (int x = 0; x < w; ++x)
+    {
+        int count = 0;
+        for (int y = 0; y < r && y < h; ++y)
+            count += near[(size_t)y * w + x];
+        for (int y = 0; y < h; ++y)
+        {
+            if (y + r < h) count += near[(size_t)(y + r) * w + x];
+            if (y - r - 1 >= 0) count -= near[(size_t)(y - r - 1) * w + x];
+            if (count == 0)
+            {
+                float* p = rgb.data() + ((size_t)y * w + x) * 3;
+                p[0] = p[1] = p[2] = 0.0f;
+                ++cleared;
+            }
+        }
+    }
+    return cleared;
+}
+
+bool CK_CompactFgFile(const std::string& fg_path, const std::string& alpha_path,
+                      const std::string& out_path, std::string& error)
+{
+    CK_Frame f;
+    if (!CK_LoadFramePair(fg_path, alpha_path, f, error))
+        return false;
+    CK_ClearUnusedFg(f.rgb, f.alpha, f.width, f.height, CK_COMPACT_BORDER);
+    return CK_WriteExrRGB(out_path, f.width, f.height, f.rgb.data(), error, true);
 }

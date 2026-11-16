@@ -272,6 +272,10 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
 
     static CK_PreviewState last_preview = CK_PV_OFF;
     static unsigned long last_info = 0;
+    static unsigned long last_compact = 0;
+    const unsigned long compact = CK_CompactVersion();
+    const bool compact_changed = compact != last_compact;
+    last_compact = compact;
     const CK_PreviewState preview = CK_PreviewQuery();
     const unsigned long info = CK_PreviewInfoVersion();
     // While the helper loads, redraw every pass so its timer ticks.
@@ -284,7 +288,7 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
     // folder resolve differently, so redraw.
     const bool project_changed = CK_SetProjectDir(QueryProjectDir(S_basic));
 
-    if ((CK_PollTrackedJobs() || preview_changed || project_changed) && S_basic)
+    if ((CK_PollTrackedJobs() || preview_changed || project_changed || compact_changed) && S_basic)
     {
         try
         {
@@ -547,6 +551,14 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                   0,
                   PF_ParamFlag_SUPERVISE | PF_ParamFlag_CANNOT_TIME_VARY,
                   CHOOSE_CACHE_DISK_ID);
+
+    // On: once a key is done, the fg colour far from the matte is cleared and
+    // the frames re-saved smaller. Off: full-size fg, as its own key.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX(STR(StrID_CompactKeys_Name),
+                     TRUE,
+                     PF_ParamFlag_CANNOT_TIME_VARY,
+                     COMPACT_KEYS_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(CACHE_END_DISK_ID);
@@ -1260,6 +1272,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     req.carry_quality = (float)(params[CK_CARRY_QUALITY]->u.fs_d.value / 100.0);
     req.exact_hint = params[CK_EXACT_HINT]->u.bd.value != 0;
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
+    req.compact = params[CK_COMPACT_KEYS]->u.bd.value != 0;
     switch (params[CK_TEMPORAL]->u.pd.value)
     {
         case CK_TW_80: req.temporal_chunk = 80; break;
@@ -1357,7 +1370,9 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
              !CK_AskYesNo(title, "This clip is already keyed with these settings.\n\n"
                                  "Key it again from scratch?"))
     {
-        // Just relink to the existing result.
+        // Just relink to the existing result (compacting it if it isn't yet).
+        if (req.compact)
+            CK_EnableCompact(job_dir);
     }
     else
     {
@@ -1937,6 +1952,10 @@ PF_Err EffectMain(PF_Cmd cmd,
 
             case PF_Cmd_GLOBAL_SETUP:
                 err = GlobalSetup(in_data, out_data, params, output);
+                break;
+
+            case PF_Cmd_GLOBAL_SETDOWN:
+                CK_StopCompactor();
                 break;
 
             case PF_Cmd_PARAMS_SETUP:

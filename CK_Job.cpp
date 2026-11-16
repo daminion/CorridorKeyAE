@@ -1,5 +1,11 @@
 #include "CK_Job.h"
 #include "CK_Platform.h"
+#include "CK_Frames.h"
+
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <thread>
 
 #include <cmath>
 #include <cstdio>
@@ -173,6 +179,24 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
                       req.render_hash, req.rendered_linear ? 1 : 0);
         key += settings;
     }
+    if (!req.compact)
+        key += "|full";   // full-size fg is a different key from a compacted one
+    if (req.is_sequence)
+    {
+        // A re-rendered sequence can keep its first frame's size and date, so
+        // also fingerprint the frame count and the middle and last frames.
+        const std::string seq_dir = ParentDir(req.source_path);
+        const std::string name = FileNamePart(req.source_path);
+        const size_t dot = name.find_last_of('.');
+        const std::vector<std::string> files =
+            CK_ListFilesWithExt(seq_dir, dot == std::string::npos ? std::string() : name.substr(dot));
+        if (!files.empty())
+        {
+            key += "|seqn=" + std::to_string(files.size());
+            key += "|mid=" + CK_FileStamp(files[files.size() / 2]);
+            key += "|last=" + CK_FileStamp(files.back());
+        }
+    }
     if (req.trimmed)
     {
         // Untrimmed keys keep the same id as before trimming existed.
@@ -204,6 +228,15 @@ bool CK_StartJob(const std::string& job_dir,
     CK_RemoveFile(job_dir + "\\done.flag");
     CK_RemoveFile(job_dir + "\\failed.flag");
     CK_RemoveFile(job_dir + "\\pid.txt");
+
+    // Re-keying: stop compacting the old frames, start compact state afresh.
+    CK_CancelCompact(job_dir);
+    CK_RemoveFile(job_dir + "\\compact.txt");
+    CK_RemoveFile(job_dir + "\\compact.done");
+    if (req.compact)
+        CK_WriteTextFile(job_dir + "\\compact.flag", "");
+    else
+        CK_RemoveFile(job_dir + "\\compact.flag");
     CK_WriteTextFile(job_dir + "\\source.txt", req.source_path + "\r\n");
 
     const std::string hint_path = job_dir + "\\hint_frame0.png";
@@ -466,7 +499,10 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
         st.frames_done = CK_CountExrInSubdir(job_dir, "_fg_exr");
 
         if (CK_FileExists(job_dir + "\\done.flag"))
+        {
             st.state = CK_JOB_DONE;
+            CK_RequestCompact(job_dir);
+        }
         else if (CK_FileExists(job_dir + "\\failed.flag"))
             st.state = CK_JOB_FAILED;
         else
@@ -611,4 +647,191 @@ std::string CK_ResolveJobDir(const std::string& stored)
     r.dir = dir;
     r.tick = now ? now : 1;
     return dir;
+}
+
+// ---------------------------------------------------------------------------
+// Compact Keys worker
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::mutex g_cmp_mutex;
+    std::condition_variable g_cmp_cv;
+    std::deque<std::string> g_cmp_queue;
+    std::string g_cmp_active;           // folder being compacted ("" = idle)
+    bool g_cmp_cancel = false;          // abandon g_cmp_active
+    bool g_cmp_quit = false;
+    int g_cmp_done = 0, g_cmp_total = 0;
+    unsigned long g_cmp_version = 1;
+
+    // Detached (not joined) if the DLL unloads without GLOBAL_SETDOWN:
+    // joining from a static destructor can deadlock on the loader lock.
+    struct WorkerThread
+    {
+        std::thread t;
+        ~WorkerThread() { if (t.joinable()) t.detach(); }
+    } g_cmp_thread;
+
+    bool Stopping()
+    {
+        std::lock_guard<std::mutex> lock(g_cmp_mutex);
+        return g_cmp_cancel || g_cmp_quit;
+    }
+
+    void CompactJob(const std::string& dir)
+    {
+        const std::string fg_dir = CK_FindSubdir(dir, "_fg_exr");
+        const std::string al_dir = CK_FindSubdir(dir, "_alpha_exr");
+        if (fg_dir.empty() || al_dir.empty())
+            return;
+        const int total = CK_CountExrInSubdir(dir, "_fg_exr");
+        int i = std::atoi(CK_ReadTextFile(dir + "\\compact.txt").c_str());
+        if (i < 0 || i > total) i = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_cmp_mutex);
+            g_cmp_done = i;
+            g_cmp_total = total;
+            ++g_cmp_version;
+        }
+
+        for (; i < total; ++i)
+        {
+            if (Stopping())
+                return;
+            char name[64];
+            std::snprintf(name, sizeof(name), "\\fg_%06d.exr", i);
+            const std::string fg = fg_dir + name;
+            std::snprintf(name, sizeof(name), "\\alpha_%06d.exr", i);
+            const std::string al = al_dir + name;
+            std::snprintf(name, sizeof(name), "\\fg_%06d.tmp", i);
+            const std::string tmp = fg_dir + name;
+
+            std::string error;
+            if (CK_CompactFgFile(fg, al, tmp, error))
+            {
+                // A render may have the frame open for a moment: retry briefly,
+                // and leave this one full-size if it stays busy.
+                bool replaced = false;
+                for (int attempt = 0; attempt < 10 && !replaced; ++attempt)
+                {
+                    replaced = CK_ReplaceFile(tmp, fg);
+                    if (!replaced)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                }
+                if (!replaced)
+                    CK_RemoveFile(tmp);
+            }
+            else
+                CK_RemoveFile(tmp);
+
+            CK_WriteTextFile(dir + "\\compact.txt", std::to_string(i + 1));
+            std::lock_guard<std::mutex> lock(g_cmp_mutex);
+            g_cmp_done = i + 1;
+            ++g_cmp_version;
+        }
+        if (!Stopping())
+        {
+            CK_WriteTextFile(dir + "\\compact.done", "");
+            CK_RemoveFile(dir + "\\compact.txt");
+        }
+    }
+
+    void Worker()
+    {
+        std::unique_lock<std::mutex> lock(g_cmp_mutex);
+        for (;;)
+        {
+            g_cmp_cv.wait(lock, [] { return g_cmp_quit || !g_cmp_queue.empty(); });
+            if (g_cmp_quit)
+                break;
+            g_cmp_active = g_cmp_queue.front();
+            g_cmp_queue.pop_front();
+            g_cmp_cancel = false;
+            g_cmp_done = g_cmp_total = 0;
+            ++g_cmp_version;
+            const std::string dir = g_cmp_active;
+
+            lock.unlock();
+            CompactJob(dir);
+            lock.lock();
+
+            g_cmp_active.clear();
+            ++g_cmp_version;
+            g_cmp_cv.notify_all();      // CK_CancelCompact may be waiting
+        }
+        g_cmp_active.clear();
+        g_cmp_cv.notify_all();
+    }
+}
+
+void CK_RequestCompact(const std::string& job_dir)
+{
+    if (!CK_FileExists(job_dir + "\\compact.flag") || CK_FileExists(job_dir + "\\compact.done"))
+        return;
+    std::lock_guard<std::mutex> lock(g_cmp_mutex);
+    if (g_cmp_quit || g_cmp_active == job_dir)
+        return;
+    for (const std::string& q : g_cmp_queue)
+        if (q == job_dir)
+            return;
+    g_cmp_queue.push_back(job_dir);
+    ++g_cmp_version;
+    if (!g_cmp_thread.t.joinable())
+        g_cmp_thread.t = std::thread(Worker);
+    g_cmp_cv.notify_all();
+}
+
+void CK_CancelCompact(const std::string& job_dir)
+{
+    std::unique_lock<std::mutex> lock(g_cmp_mutex);
+    for (auto it = g_cmp_queue.begin(); it != g_cmp_queue.end();)
+        it = *it == job_dir ? g_cmp_queue.erase(it) : it + 1;
+    if (g_cmp_active == job_dir)
+    {
+        g_cmp_cancel = true;
+        g_cmp_cv.wait_for(lock, std::chrono::seconds(30),
+                          [&] { return g_cmp_active != job_dir; });
+    }
+    ++g_cmp_version;
+}
+
+void CK_EnableCompact(const std::string& job_dir)
+{
+    if (!CK_FileExists(job_dir + "\\compact.flag"))
+        CK_WriteTextFile(job_dir + "\\compact.flag", "");
+    CK_RequestCompact(job_dir);
+}
+
+bool CK_CompactProgress(const std::string& job_dir, int& done, int& total)
+{
+    std::lock_guard<std::mutex> lock(g_cmp_mutex);
+    done = total = 0;
+    if (g_cmp_active == job_dir)
+    {
+        done = g_cmp_done;
+        total = g_cmp_total;
+        return true;
+    }
+    for (const std::string& q : g_cmp_queue)
+        if (q == job_dir)
+            return true;
+    return false;
+}
+
+unsigned long CK_CompactVersion()
+{
+    std::lock_guard<std::mutex> lock(g_cmp_mutex);
+    return g_cmp_version;
+}
+
+void CK_StopCompactor()
+{
+    {
+        std::lock_guard<std::mutex> lock(g_cmp_mutex);
+        g_cmp_quit = true;
+        g_cmp_queue.clear();
+    }
+    g_cmp_cv.notify_all();
+    if (g_cmp_thread.t.joinable())
+        g_cmp_thread.t.join();
 }

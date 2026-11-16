@@ -19,7 +19,7 @@ Notes for picking this project up in a new session. README.md covers what the ef
 - **PiPL outflags must match GlobalSetup.**
   - out_flags = 33587200 (DEEP_COLOR_AWARE + CUSTOM_UI)
   - out_flags2 = 136320000 (0x8201400: THREADED_RENDERING + I_MIX_GUID_DEPENDENCIES 0x200000 + FLOAT_COLOR_AWARE + SMART_RENDER)
-- **Version:** `MINOR_VERSION` in CorridorKeyAE.h and `AE_Effect_Version` in the PiPL (MINOR << 15) move together. Current: **0.14 = 458752**.
+- **Version:** `MINOR_VERSION` in CorridorKeyAE.h and `AE_Effect_Version` in the PiPL (MINOR << 15) move together. Current: **0.15 = 491520**.
 - **Disk IDs** are append-only. Retired IDs stay listed in the enum and are never reused. Parameter *indices* can be reordered freely.
 - **Popup choices** are stored 1-based, so new choices are appended at the end (e.g. Despill Method "Off" = 4).
 - **`CK_EffectData`** (flattened into the Status arb param) is a fixed POD struct. New fields come out of `reserved[]`; unflatten zero-fills anything an older project doesn't have.
@@ -31,10 +31,10 @@ Notes for picking this project up in a new session. README.md covers what the ef
 |---|---|
 | CorridorKeyAE.cpp / .h | params, Key Clip, Preview Frame, SmartFX PreRender/SmartRender, idle hook, project-folder lookup |
 | CorridorKeyAE_UI.cpp | Status line (Drawbot) and its idle refresh |
-| CK_Job.* | background `infer.py` jobs: hashing, trimming, command line, status, log-phase parsing, project-folder key resolving |
+| CK_Job.* | background `infer.py` jobs: hashing, trimming, command line, status, log-phase parsing, project-folder key resolving, Compact Keys worker |
 | CK_Preview.* + tools/ck_preview_server.py | Preview Frame helper process (model stays loaded; JSON over TCP). The script is embedded as CK_PreviewScript.h; regenerate with `python tools/embed_preview_script.py` |
 | CK_Render.* | live controls: despill, choke, gamma, despeckle, Keep Original |
-| CK_Frames.* | EXR read/write (tinyexr + miniz) with an 8-frame LRU |
+| CK_Frames.* | EXR read/write (tinyexr + miniz) with an 8-frame LRU; fg compaction |
 | CK_Hint.* | mask rasterising, hint PNG, layer to hint |
 | CK_Platform.h / _Win.cpp | settings.ini, dialogs, processes, files, TCP |
 | tools/CorridorKey_Setup.bat/.ps1 | setup menu (1-8; 7 = manage cached keys, 8 = open settings.ini) |
@@ -59,7 +59,9 @@ Notes for picking this project up in a new session. README.md covers what the ef
 - **Built, not yet tested:** Preview Frame's "loading model" line now shows an elapsed timer (pid.txt age via `CK_PreviewLoadingSeconds`; the idle hook redraws every pass while the helper is loading).
 - **Built, not yet tested:** clicking Preview Frame while the helper is loading used to sit on "waiting - stay on that frame" long after loading finished (the render had already returned the plate, and nothing re-triggered it). `GetPreviewFrame` now holds the clicked frame's render until the helper is ready (polls `PF_ABORT`, 3 min cap).
 - **Built, not yet tested:** cache cleanup. Preview Frame deletes its `in` frame once keyed, and low-VRAM jobs delete `<key>\tmp` when they finish. (Staged input frames were already half-float ZIP, and `<key>\frames` was already removed after each job.)
-- **Cache size ideas, not chosen yet:** DWAA (lossy) compression for the fg pass only; an alpha-only option for Keep Original users. PNG 16 was ruled out: keys are already half-float, and PNG would clip values over 1.0.
+- **Built, not yet tested (v0.15): Compact Keys** (checkbox, Cache group, default on). Key Clip writes `compact.flag`; when `CK_QueryJob` sees the key done it queues it for a worker thread in CK_Job.cpp, which rewrites each `fg_*.exr` via `CK_CompactFgFile` (CK_Frames.cpp: fg cleared where no alpha > 0 lies within `CK_COMPACT_BORDER` = 51 px, saved half PIZ) to `fg_*.tmp`, then `CK_ReplaceFile` (retries if a render has it open). Resume point `compact.txt`, finished `compact.done`. `CK_StartJob` cancels/clears it on re-key; GLOBAL_SETDOWN joins the worker. Off adds `|full` to the key ID. Linux tests: border maths vs brute force, visible pixels bit-identical, worker queue/cancel/resume (synthetic 4K grainy frame 31 MB -> 9.5 MB). Eric's real 4K shot: fg 1.13 GB/sec, alpha 53 MB before this.
+- **Built, not yet tested:** sequence key IDs also hash file count + middle + last frame stamps (changes existing sequence key IDs only).
+- **Not chosen:** alpha-only keys (Eric wants CorridorKey's fg edge colour); DWAA (tinyexr can't read it). PNG 16 ruled out (keys are already half-float; PNG clips > 1.0).
 - **Known gap:** neither loading line has a percentage, because CorridorKey doesn't report any while it loads.
 
 ## Ideas not yet built (roughly in priority order)

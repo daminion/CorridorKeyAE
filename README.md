@@ -29,6 +29,11 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
   - Despill Method: Off (appended, so saved choices don't shift).
   - Keep Original in Solid Areas is on for new effects.
 - **v0.14 (testing):** Cache group is now **Save Keys In**: Project Folder (default; `<folder of the .aep>\CorridorKeys`, or the global cache while the project is unsaved) / Global Cache / Custom Folder (Choose... picks it and switches to Custom). A key stored in some project's CorridorKeys folder is found next to the open project if the project was moved or copied (the open project's copy wins). Preview Frame results and render staging for Global stay in the global cache (setup menu option 6). The old Reset and Global Settings buttons are gone; settings.ini is edited through the setup menu.
+- **v0.15 (testing):**
+  - **Compact Keys (smaller files)** in the Cache group, on by default. Once a key finishes, each fg frame is re-saved (PIZ) with the colour cleared wherever no matte lies within 51 px; the Status line shows "compacting i/N". Every pixel you can see is unchanged, including Matte Choke growing the edge up to 50 px; only Output > Foreground shows black away from the subject. Off = full-size fg as its own key. Reusing an existing key with it on compacts that key.
+  - Image sequences are fingerprinted by frame count and the middle and last frames too, so a re-rendered sequence gets a fresh key. (Existing sequence keys get new IDs; clip keys are unchanged.)
+  - Preview Frame: the loading line shows a timer, and a click while the model loads no longer sticks on "waiting - stay on that frame".
+  - Preview input frames and low-VRAM scratch folders are deleted once used.
 
 Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it. Option 7 manages cached keys: lists each key's clip, frames, size, date and state, and deletes picked keys, keys whose source is missing, or keys older than N days (running keys are never deleted).
 

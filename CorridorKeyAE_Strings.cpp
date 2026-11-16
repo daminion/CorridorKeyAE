@@ -37,6 +37,7 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_CacheLocation_Choices, "Project Folder|Global Cache|Custom Folder",
     StrID_ChooseCache_Name,      "Custom Folder",
     StrID_ChooseCache_Button,    "Choose...",
+    StrID_CompactKeys_Name,      "Compact Keys (smaller files)",
     StrID_Status_Name,           "Status",
     StrID_HintGroup_Name,        "Hint",
     StrID_HintSource_Name,       "Hint Source",
