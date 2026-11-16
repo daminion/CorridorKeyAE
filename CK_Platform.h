@@ -83,3 +83,18 @@ std::string CK_ResolveFfmpegExe(const CK_GlobalSettings& gs);
 
 // AE hands file paths over as null-terminated UTF-16.
 std::string CK_FromUtf16(const unsigned short* s);
+
+// ---- v0.11: preview helper + rendered key source ----------------------
+
+// Rename/move a folder (same drive is instant). False on failure.
+bool CK_MoveDir(const std::string& src_utf8, const std::string& dst_utf8);
+
+// Deletes a folder and everything in it. True if it's gone afterwards.
+bool CK_RemoveTree(const std::string& dir_utf8);
+
+// One request line to 127.0.0.1:port, waits for one reply line.
+bool CK_TcpRequest(int port, const std::string& request, unsigned long timeout_ms,
+                   std::string& reply);
+
+// %LOCALAPPDATA%\CorridorKeyAE
+std::string CK_LocalAppDataDir();

@@ -7,6 +7,8 @@
 #define NOMINMAX
 #endif
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <cstring>
 #include <cstdio>
@@ -20,6 +22,7 @@
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 namespace
 {
@@ -458,4 +461,78 @@ std::string CK_ResolveFfmpegExe(const CK_GlobalSettings& gs)
     if (!gs.ffmpeg_exe.empty())
         return gs.ffmpeg_exe;
     return CK_FindOnPath("ffmpeg.exe");
+}
+
+// ---- v0.11: preview helper + rendered key source ----------------------
+
+bool CK_MoveDir(const std::string& src_utf8, const std::string& dst_utf8)
+{
+    return MoveFileExW(Widen(src_utf8).c_str(), Widen(dst_utf8).c_str(),
+                       MOVEFILE_COPY_ALLOWED) != 0;
+}
+
+bool CK_RemoveTree(const std::string& dir_utf8)
+{
+    if (!CK_DirExists(dir_utf8)) return true;
+    // SHFileOperation needs a double-null-terminated path.
+    std::wstring from = Widen(dir_utf8);
+    from.push_back(L'\0');
+    SHFILEOPSTRUCTW op;
+    ZeroMemory(&op, sizeof(op));
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = FOF_NO_UI;
+    return SHFileOperationW(&op) == 0 && !CK_DirExists(dir_utf8);
+}
+
+bool CK_TcpRequest(int port, const std::string& request, unsigned long timeout_ms,
+                   std::string& reply)
+{
+    reply.clear();
+    static bool started = false;
+    if (!started)
+    {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
+        started = true;
+    }
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return false;
+
+    DWORD to = timeout_ms;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&to), sizeof(to));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&to), sizeof(to));
+
+    sockaddr_in addr;
+    ZeroMemory(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    bool ok = connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
+    if (ok)
+    {
+        std::string line = request + "\n";
+        ok = send(s, line.c_str(), (int)line.size(), 0) == (int)line.size();
+    }
+    if (ok)
+    {
+        char buf[4096];
+        for (;;)
+        {
+            int n = recv(s, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            reply.append(buf, n);
+            if (!reply.empty() && reply.back() == '\n') break;
+        }
+        ok = !reply.empty();
+    }
+    closesocket(s);
+    return ok;
+}
+
+std::string CK_LocalAppDataDir()
+{
+    return Narrow(KnownFolder(FOLDERID_LocalAppData)) + "\\CorridorKeyAE";
 }

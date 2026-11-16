@@ -34,6 +34,12 @@ struct CK_JobRequest
     int         height = 0;
     std::string hint_png;            // first-frame hint PNG bytes ("" = no hint)
     std::vector<std::string> hint_frames;  // per-frame hint PNGs (empty = none)
+
+    // Rendered Key Source: frames already rendered by AE (no source file).
+    bool        rendered = false;
+    bool        rendered_linear = false;     // EXRs hold scene-linear values
+    unsigned long long render_hash = 0;      // fingerprint of the rendered pixels
+    std::string prerendered_dir;             // moved into <job>\frames by CK_StartJob
 };
 
 enum CK_JobState

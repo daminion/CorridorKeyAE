@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 10
+#define MINOR_VERSION 11
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -41,7 +41,10 @@ typedef struct CK_EffectData
     A_long generation;                  // bumps when a job starts/finishes (forces re-render)
     A_long fps_x1000;                   // source frame rate * 1000 (0 = unknown)
     A_long src_start;                   // source frame of cached frame 0 (trimmed keys)
-    A_long reserved[6];
+    A_long preview_time;                // Preview Frame: layer time to preview...
+    A_long preview_scale;               // ...in this time scale
+    A_long preview_token;               // bumps on every Preview Frame click (0 = never)
+    A_long reserved[3];
 } CK_EffectData;
 
 // Parameter order (indices). Saved projects are matched by disk ID, not by
@@ -51,6 +54,7 @@ enum
     CK_INPUT = 0,
     CK_KEY_CLIP,
     CK_STATUS,              // arbitrary param: draws status, holds CK_EffectData
+    CK_PREVIEW_FRAME,
     CK_OUTPUT_MODE,
     CK_WORKING_SPACE,
     CK_DESPILL,
@@ -72,6 +76,7 @@ enum
     CK_HINT_END,
     // Key Settings group
     CK_RANGE_START,
+    CK_KEY_SOURCE,
     CK_KEY_RANGE,
     CK_HANDLES,
     CK_TEMPORAL,
@@ -124,7 +129,19 @@ enum
     PICKED_COLOUR_DISK_ID,
     DESPILL_METHOD_DISK_ID,
     DESPECKLE_DISK_ID,
-    KEEP_ORIGINAL_DISK_ID
+    KEEP_ORIGINAL_DISK_ID,
+    // v0.11
+    PREVIEW_FRAME_DISK_ID,
+    KEY_SOURCE_DISK_ID
+};
+
+// Key Source popup
+enum
+{
+    CK_KS_AUTO = 1,         // footage file if there is one, else render the layer
+    CK_KS_FILE,
+    CK_KS_RENDERED,
+    CK_KS_NUM = CK_KS_RENDERED
 };
 
 // Screen Colour popup

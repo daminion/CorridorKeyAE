@@ -11,6 +11,7 @@
 #include "CK_Frames.h"
 #include "CK_Render.h"
 #include "CK_Hint.h"
+#include "CK_Preview.h"
 
 #include <algorithm>
 #include <cmath>
@@ -233,7 +234,12 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
         return A_Err_NONE;
     last = now;
 
-    if (CK_PollTrackedJobs() && S_basic)
+    static CK_PreviewState last_preview = CK_PV_OFF;
+    const CK_PreviewState preview = CK_PreviewQuery();
+    const bool preview_changed = preview != last_preview;
+    last_preview = preview;
+
+    if ((CK_PollTrackedJobs() || preview_changed) && S_basic)
     {
         try
         {
@@ -314,6 +320,13 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                       default_arbH,
                       STATUS_DISK_ID,
                       NULL);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_BUTTON(STR(StrID_PreviewFrame_Name),
+                  STR(StrID_PreviewFrame_Button),
+                  0,
+                  PF_ParamFlag_SUPERVISE | PF_ParamFlag_CANNOT_TIME_VARY,
+                  PREVIEW_FRAME_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX(STR(StrID_OutputMode_Name),
@@ -430,6 +443,14 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     // --- Key Settings: range and time window for the next Key Clip ----------
     AEFX_CLR_STRUCT(def);
     PF_ADD_TOPIC(STR(StrID_RangeGroup_Name), RANGE_START_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_KeySource_Name),
+                  CK_KS_NUM,
+                  CK_KS_AUTO,
+                  STR(StrID_KeySource_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  KEY_SOURCE_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX(STR(StrID_KeyRange_Name),
@@ -574,10 +595,101 @@ static const char* DescribeCacheFolder(const std::string& path)
 }
 
 // ---------------------------------------------------------------------------
+// Pixel helpers
+// ---------------------------------------------------------------------------
+
+static PF_PixelFormat WorldFormat(PF_InData* in_data, PF_OutData* out_data, PF_EffectWorld* w)
+{
+    PF_PixelFormat fmt = PF_PixelFormat_INVALID;
+    try
+    {
+        AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data, kPFWorldSuite,
+                                                     kPFWorldSuiteVersion2, out_data);
+        world_suite->PF_GetPixelFormat(w, &fmt);
+    }
+    catch (...)
+    {
+    }
+    if (fmt == PF_PixelFormat_INVALID)
+        fmt = PF_WORLD_IS_DEEP(w) ? PF_PixelFormat_ARGB64 : PF_PixelFormat_ARGB32;
+    return fmt;
+}
+
+// AE world -> interleaved RGB floats (row 0 = top).
+// decode_srgb: sRGB-encoded values to linear. unpremult: divide by alpha.
+static void ReadWorldRGB(const PF_EffectWorld* w, PF_PixelFormat fmt, bool decode_srgb,
+                         bool unpremult, std::vector<float>& out)
+{
+    out.resize((size_t)w->width * w->height * 3);
+    for (A_long y = 0; y < w->height; ++y)
+    {
+        const char* row = reinterpret_cast<const char*>(w->data) + (size_t)y * w->rowbytes;
+        for (A_long x = 0; x < w->width; ++x)
+        {
+            float a, r, g, b;
+            switch (fmt)
+            {
+                case PF_PixelFormat_ARGB128:
+                {
+                    const PF_PixelFloat* p = reinterpret_cast<const PF_PixelFloat*>(row) + x;
+                    a = p->alpha; r = p->red; g = p->green; b = p->blue;
+                    break;
+                }
+                case PF_PixelFormat_ARGB64:
+                {
+                    const PF_Pixel16* p = reinterpret_cast<const PF_Pixel16*>(row) + x;
+                    const float k = 1.0f / PF_MAX_CHAN16;
+                    a = p->alpha * k; r = p->red * k; g = p->green * k; b = p->blue * k;
+                    break;
+                }
+                default:
+                {
+                    const PF_Pixel8* p = reinterpret_cast<const PF_Pixel8*>(row) + x;
+                    const float k = 1.0f / PF_MAX_CHAN8;
+                    a = p->alpha * k; r = p->red * k; g = p->green * k; b = p->blue * k;
+                    break;
+                }
+            }
+            if (unpremult && a > 1e-4f && a < 0.9999f) { r /= a; g /= a; b /= a; }
+            float* o = &out[((size_t)y * w->width + x) * 3];
+            o[0] = decode_srgb ? CK_SRGBToLinear(r) : r;
+            o[1] = decode_srgb ? CK_SRGBToLinear(g) : g;
+            o[2] = decode_srgb ? CK_SRGBToLinear(b) : b;
+        }
+    }
+}
+
+static unsigned long long HashBytes(const void* data, size_t n,
+                                    unsigned long long h = 1469598103934665603ULL)
+{
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    for (size_t i = 0; i < n; ++i)
+    {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+// Exact identity of a world's pixels (used to name preview results).
+static unsigned long long HashWorld(const PF_EffectWorld* w, PF_PixelFormat fmt,
+                                   unsigned long long h)
+{
+    const size_t px = fmt == PF_PixelFormat_ARGB128 ? 16 : fmt == PF_PixelFormat_ARGB64 ? 8 : 4;
+    const long dims[3] = { (long)w->width, (long)w->height, (long)fmt };
+    h = HashBytes(dims, sizeof(dims), h);
+    for (A_long y = 0; y < w->height; ++y)
+        h = HashBytes(reinterpret_cast<const char*>(w->data) + (size_t)y * w->rowbytes,
+                      px * (size_t)w->width, h);
+    return h;
+}
+
+// ---------------------------------------------------------------------------
 // Layer source lookup
 // ---------------------------------------------------------------------------
 
-static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& error)
+static bool GetLayerSource(PF_InData* in_data, A_long key_source,
+                           CK_JobRequest& req, std::string& error)
 {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
     PF_Err err = PF_Err_NONE;
@@ -597,42 +709,62 @@ static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& 
         error = "Couldn't find this layer's source.";
         return false;
     }
-    if (type != AEGP_ItemType_FOOTAGE)
-    {
-        error = "Key Clip works on footage layers (a movie file or image sequence).\n\n"
-                "Precomps aren't supported yet - apply the effect to the footage itself.";
-        return false;
-    }
 
-    AEGP_FootageH footageH = NULL;
+    // Footage file details (also gives the frame rate for rendered footage).
     A_long num_files = 0, files_per_frame = 0;
-    AEGP_MemHandle pathH = NULL;
-
-    ERR(suites.FootageSuite5()->AEGP_GetMainFootageFromItem(itemH, &footageH));
-    if (!err && footageH)
-        ERR(suites.FootageSuite5()->AEGP_GetFootageNumFiles(footageH, &num_files, &files_per_frame));
-    if (!err && footageH)
-        ERR(suites.FootageSuite5()->AEGP_GetFootagePath(footageH, 0,
-                                                        AEGP_FOOTAGE_MAIN_FILE_INDEX, &pathH));
-    if (!err && pathH)
+    if (type == AEGP_ItemType_FOOTAGE)
     {
-        A_UTF16Char* p = NULL;
-        ERR(suites.MemorySuite1()->AEGP_LockMemHandle(pathH, reinterpret_cast<void**>(&p)));
-        if (!err && p)
-            req.source_path = CK_FromUtf16(reinterpret_cast<const unsigned short*>(p));
-        suites.MemorySuite1()->AEGP_UnlockMemHandle(pathH);
-        suites.MemorySuite1()->AEGP_FreeMemHandle(pathH);
+        AEGP_FootageH footageH = NULL;
+        AEGP_MemHandle pathH = NULL;
+        ERR(suites.FootageSuite5()->AEGP_GetMainFootageFromItem(itemH, &footageH));
+        if (!err && footageH)
+            ERR(suites.FootageSuite5()->AEGP_GetFootageNumFiles(footageH, &num_files, &files_per_frame));
+        if (!err && footageH)
+            ERR(suites.FootageSuite5()->AEGP_GetFootagePath(footageH, 0,
+                                                            AEGP_FOOTAGE_MAIN_FILE_INDEX, &pathH));
+        if (!err && pathH)
+        {
+            A_UTF16Char* p = NULL;
+            ERR(suites.MemorySuite1()->AEGP_LockMemHandle(pathH, reinterpret_cast<void**>(&p)));
+            if (!err && p)
+                req.source_path = CK_FromUtf16(reinterpret_cast<const unsigned short*>(p));
+            suites.MemorySuite1()->AEGP_UnlockMemHandle(pathH);
+            suites.MemorySuite1()->AEGP_FreeMemHandle(pathH);
+        }
+        err = PF_Err_NONE;
+
+        AEGP_FootageInterp interp;
+        AEFX_CLR_STRUCT(interp);
+        if (!suites.FootageSuite5()->AEGP_GetFootageInterpretation(itemH, FALSE, &interp))
+            req.fps = interp.conform_fpsF > 0 ? interp.conform_fpsF : interp.native_fpsF;
     }
-
-    if (err || req.source_path.empty() || !CK_FileExists(req.source_path))
+    else if (type == AEGP_ItemType_COMP)
     {
-        error = req.source_path.empty()
-                    ? "This layer has no source file (solid, text or placeholder)."
-                    : "The source file is missing:\n  " + req.source_path;
+        AEGP_CompH compH = NULL;
+        A_FpLong fps = 0;
+        if (!suites.CompSuite11()->AEGP_GetCompFromItem(itemH, &compH) && compH &&
+            !suites.CompSuite11()->AEGP_GetCompFramerate(compH, &fps))
+            req.fps = fps;
+    }
+    if (req.fps <= 0)   // solids etc.: the comp's own rate
+        req.fps = in_data->time_step ? (double)in_data->time_scale / in_data->time_step : 24.0;
+
+    const bool have_file = type == AEGP_ItemType_FOOTAGE && !req.source_path.empty() &&
+                           CK_FileExists(req.source_path);
+    req.rendered = key_source == CK_KS_RENDERED ||
+                   (key_source == CK_KS_AUTO && type != AEGP_ItemType_FOOTAGE);
+
+    if (!req.rendered && !have_file)
+    {
+        if (type != AEGP_ItemType_FOOTAGE)
+            error = "Key Source is set to Source File, but this layer isn't footage.\n\n"
+                    "Set Key Source to Auto or Rendered Layer to key a precomp.";
+        else if (req.source_path.empty())
+            error = "This layer has no source file. Set Key Source to Rendered Layer.";
+        else
+            error = "The source file is missing:\n  " + req.source_path;
         return false;
     }
-
-    req.is_sequence = num_files > 1;
 
     A_long w = 0, h = 0;
     if (!suites.ItemSuite9()->AEGP_GetItemDimensions(itemH, &w, &h))
@@ -641,20 +773,87 @@ static bool GetLayerSource(PF_InData* in_data, CK_JobRequest& req, std::string& 
         req.height = h;
     }
 
-    AEGP_FootageInterp interp;
-    AEFX_CLR_STRUCT(interp);
-    if (!suites.FootageSuite5()->AEGP_GetFootageInterpretation(itemH, FALSE, &interp))
-        req.fps = interp.conform_fpsF > 0 ? interp.conform_fpsF : interp.native_fpsF;
-    if (req.fps <= 0)
-        req.fps = 24.0;
-
     A_Time dur;
     AEFX_CLR_STRUCT(dur);
     if (!suites.ItemSuite9()->AEGP_GetItemDuration(itemH, &dur) && dur.scale)
         req.frames_total = (int)((double)dur.value / (double)dur.scale * req.fps + 0.5);
-    if (req.is_sequence && num_files > 0)
-        req.frames_total = num_files;
 
+    if (req.rendered)
+    {
+        // No file: name the key after the project item.
+        AEGP_ItemID id = 0;
+        suites.ItemSuite9()->AEGP_GetItemID(itemH, &id);
+        char name[64];
+        std::snprintf(name, sizeof(name), "rendered_item_%d", (int)id);
+        req.source_path = name;
+        req.is_sequence = false;
+    }
+    else
+    {
+        req.is_sequence = num_files > 1;
+        if (req.is_sequence && num_files > 0)
+            req.frames_total = num_files;
+    }
+    return true;
+}
+
+// Renders this layer's input (what the effect receives) for every frame in
+// req's range into staging_dir as EXRs, and fingerprints the pixels so an
+// unchanged render reuses its key. Precomp contents are always included;
+// effects above this one on the same layer may not be (an AE limitation).
+static bool RenderLayerFrames(PF_InData* in_data, PF_OutData* out_data, CK_JobRequest& req,
+                              const std::string& staging_dir, std::string& error)
+{
+    if (!CK_MakeDirs(staging_dir))
+    {
+        error = "Couldn't create a folder in the cache:\n  " + staging_dir;
+        return false;
+    }
+
+    unsigned long long hash = 1469598103934665603ULL;
+    std::vector<float> rgb;
+    for (int i = 0; i < req.frames_total; ++i)
+    {
+        const A_long t = (A_long)((double)(req.start_frame + i) * in_data->time_scale / req.fps + 0.5);
+        PF_ParamDef p;
+        AEFX_CLR_STRUCT(p);
+        if (PF_CHECKOUT_PARAM(in_data, CK_INPUT, t, in_data->time_step, in_data->time_scale, &p))
+        {
+            error = "Couldn't render the layer.";
+            return false;
+        }
+
+        PF_EffectWorld* w = &p.u.ld;
+        bool ok = w->data && w->width > 0 && w->height > 0;
+        if (ok && (w->width != req.width || w->height != req.height))
+        {
+            PF_CHECKIN_PARAM(in_data, &p);
+            char dims[160];
+            std::snprintf(dims, sizeof(dims),
+                          "The layer rendered at %dx%d instead of %dx%d.\n\n"
+                          "Set the Composition panel's resolution to Full, then click Key Clip again.",
+                          (int)w->width, (int)w->height, req.width, req.height);
+            error = dims;
+            return false;
+        }
+        if (ok)
+        {
+            ReadWorldRGB(w, WorldFormat(in_data, out_data, w), false, false, rgb);
+            hash = HashBytes(rgb.data(), rgb.size() * sizeof(float), hash);
+            char name[32];
+            std::snprintf(name, sizeof(name), "\\f_%06d.exr", i);
+            ok = CK_WriteExrRGB(staging_dir + name, w->width, w->height, rgb.data(), error);
+        }
+        PF_CHECKIN_PARAM(in_data, &p);
+        if (!ok)
+        {
+            if (error.empty())
+                error = "The layer returned no pixels.";
+            return false;
+        }
+    }
+    req.render_hash = hash;
+    req.prerendered_dir = staging_dir;
     return true;
 }
 
@@ -945,7 +1144,7 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     // 3. What are we keying, and with which settings?
     CK_JobRequest req;
     std::string error;
-    if (!GetLayerSource(in_data, req, error))
+    if (!GetLayerSource(in_data, params[CK_KEY_SOURCE]->u.pd.value, req, error))
     {
         CK_ShowMessage(title, error);
         return err;
@@ -997,8 +1196,25 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
         return err;
     }
 
+    // Rendered Key Source: render the frames now (AE is busy until done).
+    std::string staging;
+    if (req.rendered)
+    {
+        char name[48];
+        std::snprintf(name, sizeof(name), "\\_staging_%lu", CK_TickMs());
+        staging = cache_root + name;
+        req.rendered_linear = params[CK_WORKING_SPACE]->u.pd.value == CK_SPACE_LINEAR;
+        if (!RenderLayerFrames(in_data, out_data, req, staging, error))
+        {
+            CK_RemoveTree(staging);
+            CK_ShowMessage(title, error);
+            return err;
+        }
+    }
+
     std::string job_dir = CK_JobDirFor(cache_root, req);
     CK_JobStatus existing = CK_QueryJob(job_dir);
+    bool starting = false;
 
     if (existing.state == CK_JOB_RUNNING)
     {
@@ -1012,18 +1228,77 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     {
         // Just relink to the existing result.
     }
-    else if (!CK_StartJob(job_dir, req, python, gs.corridorkey_dir,
-                          CK_ResolveFfmpegExe(gs), error))
+    else
     {
-        CK_ShowMessage(title, error);
-        return err;
+        // Free the GPU for the full key.
+        CK_PreviewStop();
+        if (!CK_StartJob(job_dir, req, python, gs.corridorkey_dir,
+                         CK_ResolveFfmpegExe(gs), error))
+        {
+            CK_RemoveTree(staging);
+            CK_ShowMessage(title, error);
+            return err;
+        }
+        starting = true;
     }
+    if (!starting && !staging.empty())
+        CK_RemoveTree(staging);   // reused an existing key: rendered frames not needed
 
     SetPathField(data.job_dir, job_dir);
     data.frames_total = req.frames_total;
     data.fps_x1000 = (A_long)(req.fps * 1000.0 + 0.5);
-    data.src_start = req.trimmed ? req.start_frame : 0;
+    data.src_start = (req.trimmed || req.rendered) ? req.start_frame : 0;
     data.generation++;
+    err = CK_WriteEffectData(in_data, params, data);
+    out_data->out_flags |= PF_OutFlag_REFRESH_UI;
+    return err;
+}
+
+static PF_Err DoPreviewFrame(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[])
+{
+    PF_Err err = PF_Err_NONE;
+    const char* title = "CorridorKey_MinionsTake";
+
+    CK_GlobalSettings gs = CK_LoadGlobalSettings();
+    if (gs.corridorkey_dir.empty() ||
+        !CK_FileExists(gs.corridorkey_dir + "\\infer.py") ||
+        !CK_FileExists(CK_ResolvePythonExe(gs)))
+    {
+        CK_ShowMessage(title, "CorridorKey isn't set up yet.\n\n"
+                              "Run tools\\CorridorKey_Setup.bat from the CorridorKeyAE folder.");
+        return err;
+    }
+
+    CK_EffectData data;
+    CK_ReadEffectData(in_data, params, &data);
+    if (data.job_dir[0] && CK_QueryJob(data.job_dir).state == CK_JOB_RUNNING)
+    {
+        CK_ShowMessage(title, "Key Clip is running for this layer, so previews are paused\n"
+                              "(both would need the GPU).");
+        return err;
+    }
+
+    const CK_PreviewState st = CK_PreviewQuery();
+    if (st == CK_PV_FAILED)
+    {
+        CK_OpenInEditor(CK_PreviewLogPath());
+        if (!CK_AskYesNo(title, "The preview helper stopped with an error. Its log is open in Notepad.\n\n"
+                                "Start it again?"))
+            return err;
+    }
+    if (st != CK_PV_READY && st != CK_PV_LOADING)
+    {
+        std::string error;
+        if (!CK_PreviewStart(gs, error))
+        {
+            CK_ShowMessage(title, error);
+            return err;
+        }
+    }
+
+    data.preview_time = in_data->current_time;
+    data.preview_scale = in_data->time_scale;
+    data.preview_token++;
     err = CK_WriteEffectData(in_data, params, data);
     out_data->out_flags |= PF_OutFlag_REFRESH_UI;
     return err;
@@ -1039,6 +1314,10 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
     {
         case CK_KEY_CLIP:
             err = DoKeyClip(in_data, out_data, params);
+            break;
+
+        case CK_PREVIEW_FRAME:
+            err = DoPreviewFrame(in_data, out_data, params);
             break;
 
         case CK_CHOOSE_CACHE:
@@ -1118,6 +1397,16 @@ static int CacheIndexFor(PF_InData* in_data, const CK_EffectData& data)
            - data.src_start;
 }
 
+static bool IsPreviewTime(PF_InData* in_data, const CK_EffectData& data)
+{
+    if (data.preview_token <= 0 || data.preview_scale <= 0 || in_data->time_scale <= 0)
+        return false;
+    const double now = (double)in_data->current_time / in_data->time_scale;
+    const double then = (double)data.preview_time / data.preview_scale;
+    const double half_frame = 0.5 * (double)in_data->time_step / in_data->time_scale;
+    return std::fabs(now - then) < std::max(half_frame, 1e-4);
+}
+
 static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                         PF_PreRenderExtra* extra)
 {
@@ -1160,10 +1449,19 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                 char job[CK_PATH_MAX];
                 A_long generation;
                 A_long available;
+                A_long preview_token;
+                A_long preview_state;     // only at the clicked frame
             } mix;
             std::memset(&mix, 0, sizeof(mix));
             std::memcpy(mix.job, data.job_dir, CK_PATH_MAX);
             mix.generation = data.generation;
+            // Only the clicked frame changes version, so a click doesn't
+            // throw away AE's cache for the rest of the layer.
+            if (IsPreviewTime(in_data, data))
+            {
+                mix.preview_token = data.preview_token;
+                mix.preview_state = (A_long)CK_PreviewQuery() + 1;
+            }
 
             if (data.job_dir[0])
             {
@@ -1234,47 +1532,44 @@ static void WriteToWorld(const std::vector<float>& buf, PF_EffectWorld* w,
     }
 }
 
-// AE world (same bit depth as the output) -> linear, unpremultiplied RGB floats.
-static void ReadWorldLinear(const PF_EffectWorld* w, PF_PixelFormat fmt, bool srgb,
-                            std::vector<float>& out)
+// Preview Frame results live in <cache>\_preview\<hash of the input pixels>.
+// Any frame whose exact input was previewed before shows that result; the
+// clicked frame asks the preview helper to key it (blocking this render).
+static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
+                                                       const CK_EffectData& data,
+                                                       const PF_EffectWorld* inW,
+                                                       PF_PixelFormat fmt, bool srgb)
 {
-    out.resize((size_t)w->width * w->height * 3);
-    for (A_long y = 0; y < w->height; ++y)
-    {
-        const char* row = reinterpret_cast<const char*>(w->data) + (size_t)y * w->rowbytes;
-        for (A_long x = 0; x < w->width; ++x)
-        {
-            float a, r, g, b;
-            switch (fmt)
-            {
-                case PF_PixelFormat_ARGB128:
-                {
-                    const PF_PixelFloat* p = reinterpret_cast<const PF_PixelFloat*>(row) + x;
-                    a = p->alpha; r = p->red; g = p->green; b = p->blue;
-                    break;
-                }
-                case PF_PixelFormat_ARGB64:
-                {
-                    const PF_Pixel16* p = reinterpret_cast<const PF_Pixel16*>(row) + x;
-                    const float k = 1.0f / PF_MAX_CHAN16;
-                    a = p->alpha * k; r = p->red * k; g = p->green * k; b = p->blue * k;
-                    break;
-                }
-                default:
-                {
-                    const PF_Pixel8* p = reinterpret_cast<const PF_Pixel8*>(row) + x;
-                    const float k = 1.0f / PF_MAX_CHAN8;
-                    a = p->alpha * k; r = p->red * k; g = p->green * k; b = p->blue * k;
-                    break;
-                }
-            }
-            if (a > 1e-4f && a < 0.9999f) { r /= a; g /= a; b /= a; }
-            float* o = &out[((size_t)y * w->width + x) * 3];
-            o[0] = srgb ? CK_SRGBToLinear(r) : r;
-            o[1] = srgb ? CK_SRGBToLinear(g) : g;
-            o[2] = srgb ? CK_SRGBToLinear(b) : b;
-        }
-    }
+    // Previews pause while this layer's full key is running (GPU).
+    if (data.job_dir[0] && CK_QueryJob(data.job_dir).state == CK_JOB_RUNNING)
+        return nullptr;
+
+    const CK_GlobalSettings gs = CK_LoadGlobalSettings();
+    const std::string cache_root = CK_ResolveCacheRoot(data.cache_override, gs);
+    if (!CK_DirExists(cache_root))
+        return nullptr;
+
+    const unsigned long long h = HashWorld(inW, fmt, srgb ? 1ULL : 2ULL);
+    char hex[24];
+    std::snprintf(hex, sizeof(hex), "%016llx", h);
+    const std::string dir = cache_root + "\\_preview\\" + hex;
+
+    std::shared_ptr<const CK_Frame> frame = CK_GetKeyedFrame(dir, 0, 0);
+    if (frame || !IsPreviewTime(in_data, data) || CK_PreviewQuery() != CK_PV_READY)
+        return frame;
+
+    // Same values CorridorKey reads from a file: display values for an sRGB
+    // project, scene-linear for a linear one.
+    const std::string in_dir = dir + "\\in";
+    std::vector<float> rgb;
+    ReadWorldRGB(inW, fmt, false, false, rgb);
+    std::string error;
+    if (!CK_MakeDirs(in_dir) ||
+        !CK_WriteExrRGB(in_dir + "\\f_000000.exr", inW->width, inW->height, rgb.data(), error) ||
+        !CK_PreviewKey(in_dir, dir, !srgb, error))
+        return nullptr;
+
+    return CK_GetKeyedFrame(dir, 0, 0);
 }
 
 static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
@@ -1317,84 +1612,89 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
     ERR(PF_CHECKOUT_PARAM(in_data, CK_KEEP_ORIGINAL, t, ts, sc, &p_keep));
 
     bool drew = false;
+    CK_EffectData data;
+    const bool have_data = !err && ReadEffectDataFromParam(in_data, p_status, &data);
 
-    if (!err && inW && outW && p_mode.u.pd.value != CK_OUT_ORIGINAL)
+    if (!err && have_data && inW && outW && p_mode.u.pd.value != CK_OUT_ORIGINAL)
     {
-        CK_EffectData data;
-        if (ReadEffectDataFromParam(in_data, p_status, &data) && data.job_dir[0])
+        const bool srgb = p_space.u.pd.value != CK_SPACE_LINEAR;
+        const PF_PixelFormat fmt = WorldFormat(in_data, out_data, outW);
+
+        // 1. The finished key for this frame, if there is one.
+        std::shared_ptr<const CK_Frame> frame;
+        if (data.job_dir[0])
+            frame = CK_GetKeyedFrame(data.job_dir, CacheIndexFor(in_data, data), data.generation);
+
+        // 2. Otherwise a Preview Frame result (keyed from exactly this input).
+        const bool is_preview = !frame && data.preview_token > 0;
+        if (is_preview)
+            frame = GetPreviewFrame(in_data, data, inW, fmt, srgb);
+
+        if (frame)
         {
-            const int index = CacheIndexFor(in_data, data);
+            CK_RenderSettings s;
+            s.mode = p_mode.u.pd.value;
+            s.srgb_out = srgb;
+            s.despill = (float)(p_despill.u.fs_d.value / 100.0);
+            s.choke_px = (float)p_choke.u.fs_d.value;
+            s.gamma = (float)p_gamma.u.fs_d.value;
+            s.despeckle_px = (int)p_speck.u.sd.value;
+            s.keep_original = p_keep.u.bd.value != 0;
 
-            std::shared_ptr<const CK_Frame> frame =
-                CK_GetKeyedFrame(data.job_dir, index, data.generation);
-
-            if (frame)
+            switch (p_screen.u.pd.value)
             {
-                CK_RenderSettings s;
-                s.mode = p_mode.u.pd.value;
-                s.srgb_out = p_space.u.pd.value != CK_SPACE_LINEAR;
-                s.despill = (float)(p_despill.u.fs_d.value / 100.0);
-                s.choke_px = (float)p_choke.u.fs_d.value;
-                s.gamma = (float)p_gamma.u.fs_d.value;
-                s.despeckle_px = (int)p_speck.u.sd.value;
-                s.keep_original = p_keep.u.bd.value != 0;
+                case CK_SC_BLUE:   s.screen = CK_SCREEN_BLUE;   break;
+                case CK_SC_PICKED: s.screen = CK_SCREEN_PICKED; break;
+                default:           s.screen = CK_SCREEN_GREEN;  break;
+            }
+            switch (p_method.u.pd.value)
+            {
+                case CK_DM_GENTLE: s.method = CK_DESPILL_GENTLE; break;
+                case CK_DM_STRONG: s.method = CK_DESPILL_STRONG; break;
+                default:           s.method = CK_DESPILL_AVERAGE; break;
+            }
+            // The colour control is in the project's space; despill works in linear.
+            const PF_Pixel& pc = p_picked.u.cd.value;
+            const float pick[3] = { pc.red / 255.0f, pc.green / 255.0f, pc.blue / 255.0f };
+            for (int c = 0; c < 3; ++c)
+                s.picked[c] = s.srgb_out ? CK_SRGBToLinear(pick[c]) : pick[c];
 
-                switch (p_screen.u.pd.value)
-                {
-                    case CK_SC_BLUE:   s.screen = CK_SCREEN_BLUE;   break;
-                    case CK_SC_PICKED: s.screen = CK_SCREEN_PICKED; break;
-                    default:           s.screen = CK_SCREEN_GREEN;  break;
-                }
-                switch (p_method.u.pd.value)
-                {
-                    case CK_DM_GENTLE: s.method = CK_DESPILL_GENTLE; break;
-                    case CK_DM_STRONG: s.method = CK_DESPILL_STRONG; break;
-                    default:           s.method = CK_DESPILL_AVERAGE; break;
-                }
-                // The colour control is in the project's space; despill works in linear.
-                const PF_Pixel& pc = p_picked.u.cd.value;
-                const float pick[3] = { pc.red / 255.0f, pc.green / 255.0f, pc.blue / 255.0f };
-                for (int c = 0; c < 3; ++c)
-                    s.picked[c] = s.srgb_out ? CK_SRGBToLinear(pick[c]) : pick[c];
-
+            const float sx = in_data->downsample_x.num
+                                 ? (float)in_data->downsample_x.den / (float)in_data->downsample_x.num
+                                 : 1.0f;
+            const float sy = in_data->downsample_y.num
+                                 ? (float)in_data->downsample_y.den / (float)in_data->downsample_y.num
+                                 : 1.0f;
+            if (is_preview)
+            {
+                // The preview was keyed from this very input buffer: 1:1 pixels.
+                // Choke/Despeckle are set in full-res pixels, so scale them down.
+                s.choke_px /= sx;
+                s.despeckle_px = (int)(s.despeckle_px / (sx * sy) + 0.5f);
+            }
+            else
+            {
                 const CK_PreRenderData* prd =
                     reinterpret_cast<const CK_PreRenderData*>(extra->input->pre_render_data);
                 s.origin_x = prd ? prd->left : 0;
                 s.origin_y = prd ? prd->top : 0;
-                s.scale_x = in_data->downsample_x.num
-                                ? (float)in_data->downsample_x.den / (float)in_data->downsample_x.num
-                                : 1.0f;
-                s.scale_y = in_data->downsample_y.num
-                                ? (float)in_data->downsample_y.den / (float)in_data->downsample_y.num
-                                : 1.0f;
-
-                PF_PixelFormat fmt = PF_PixelFormat_ARGB32;
-                AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data,
-                                                             kPFWorldSuite,
-                                                             kPFWorldSuiteVersion2,
-                                                             out_data);
-                ERR(world_suite->PF_GetPixelFormat(outW, &fmt));
-
-                // Keep Original needs the plate in linear RGB, pixel-aligned with
-                // the output (same result rect, so same size).
-                std::vector<float> plate;
-                if (!err && s.keep_original &&
-                    inW->width == outW->width && inW->height == outW->height)
-                {
-                    ReadWorldLinear(inW, fmt, s.srgb_out, plate);
-                    s.plate = plate.data();
-                }
-
-                std::vector<float> buf((size_t)outW->width * outW->height * 4);
-                if (!err)
-                    CK_RenderKey(*frame, s, outW->width, outW->height, buf.data());
-
-                if (!err)
-                {
-                    WriteToWorld(buf, outW, fmt);
-                    drew = true;
-                }
+                s.scale_x = sx;
+                s.scale_y = sy;
             }
+
+            // Keep Original needs the plate in linear RGB, pixel-aligned with
+            // the output (same result rect, so same size).
+            std::vector<float> plate;
+            if (s.keep_original && inW->width == outW->width && inW->height == outW->height)
+            {
+                ReadWorldRGB(inW, fmt, s.srgb_out, true, plate);
+                s.plate = plate.data();
+            }
+
+            std::vector<float> buf((size_t)outW->width * outW->height * 4);
+            CK_RenderKey(*frame, s, outW->width, outW->height, buf.data());
+            WriteToWorld(buf, outW, fmt);
+            drew = true;
         }
     }
 

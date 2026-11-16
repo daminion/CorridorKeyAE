@@ -1,0 +1,138 @@
+# CorridorKey_MinionsTake preview helper.
+#
+# Loads the CorridorKey 2.0 model once and keys single frames on request, so
+# Preview Frame in After Effects takes seconds instead of a full model load.
+# The plug-in embeds a copy of this file and starts it with CorridorKey's own
+# Python; this copy in the repo is the readable source (keep them in sync:
+# CK_PreviewScript.h is generated from it by tools/embed_preview_script.py).
+#
+# Protocol: one JSON line per TCP connection on 127.0.0.1:<port>.
+#   {"cmd": "key", "input_dir": "...", "output_dir": "...", "linear": false}
+#   {"cmd": "ping"} / {"cmd": "quit"}
+# Reply: {"ok": true} or {"ok": false, "error": "..."}
+#
+# State files in --state_dir: port.txt (written once the model is loaded),
+# stopped.flag (written on a clean exit). Exits after --idle seconds unused.
+
+import argparse
+import json
+import os
+import socket
+import sys
+import time
+import traceback
+
+
+def log(msg):
+    print(time.strftime("%H:%M:%S"), msg, flush=True)
+
+
+def remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ck_dir", required=True)
+    ap.add_argument("--state_dir", required=True)
+    ap.add_argument("--idle", type=float, default=600.0)
+    args = ap.parse_args()
+
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+    sys.path.insert(0, args.ck_dir)
+    os.chdir(args.ck_dir)
+
+    port_file = os.path.join(args.state_dir, "port.txt")
+    stopped_flag = os.path.join(args.state_dir, "stopped.flag")
+    remove(port_file)
+    remove(stopped_flag)
+
+    from pathlib import Path
+    import torch
+    from corridorkey.runtime import (InferenceConfig, RuntimePaths,
+                                     WriterConfig, load_model, run_inference)
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CorridorKey needs a CUDA GPU.")
+
+    t0 = time.time()
+    model = load_model(RuntimePaths.from_package(Path(args.ck_dir)), device="cuda")
+    log(f"model loaded in {time.time() - t0:.1f}s")
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(16)
+    srv.settimeout(2.0)
+    port = srv.getsockname()[1]
+    with open(port_file + ".tmp", "w") as f:
+        f.write(str(port))
+    os.replace(port_file + ".tmp", port_file)
+    log(f"ready on port {port}")
+
+    last_used = time.time()
+    try:
+        while time.time() - last_used < args.idle:
+            try:
+                conn, _ = srv.accept()
+            except socket.timeout:
+                continue
+            with conn:
+                conn.settimeout(10.0)
+                data = b""
+                try:
+                    while not data.endswith(b"\n") and len(data) < 1 << 20:
+                        chunk = conn.recv(65536)
+                        if not chunk:
+                            break
+                        data += chunk
+                    req = json.loads(data.decode("utf-8"))
+                except Exception:
+                    conn.sendall(b'{"ok": false, "error": "bad request"}\n')
+                    continue
+
+                cmd = req.get("cmd", "key")
+                if cmd == "quit":
+                    conn.sendall(b'{"ok": true}\n')
+                    log("quit requested")
+                    break
+                if cmd == "ping":
+                    conn.sendall(b'{"ok": true}\n')
+                    continue
+
+                t0 = time.time()
+                try:
+                    out_dir = Path(req["output_dir"])
+                    cfg = InferenceConfig(
+                        hann_chunk=1, hann_stride=1, auto_vram=False,
+                        carry_hint=False, num_frames=1,
+                        outputs={"alpha", "fg"},
+                        output_format="exr", exr_dtype="half",
+                        frame_dir_linear=bool(req.get("linear", False)),
+                        temp_dir=out_dir / "tmp")
+                    run_inference(model, req["input_dir"], str(out_dir), cfg,
+                                  WriterConfig(), initial_hint_path=None,
+                                  hint_video_path=None)
+                    reply = {"ok": True}
+                    log(f"keyed {req['input_dir']} in {time.time() - t0:.1f}s")
+                except Exception as e:
+                    log(traceback.format_exc())
+                    reply = {"ok": False, "error": str(e)[:400]}
+                conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
+                last_used = time.time()
+        else:
+            log("idle timeout")
+    finally:
+        srv.close()
+        remove(port_file)
+        with open(stopped_flag, "w"):
+            pass
+        log("stopped")
+
+
+if __name__ == "__main__":
+    main()

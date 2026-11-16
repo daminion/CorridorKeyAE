@@ -81,6 +81,53 @@ bool CK_ReadExr(const std::string& path,
     return true;
 }
 
+bool CK_WriteExrRGB(const std::string& path, int width, int height,
+                    const float* rgb, std::string& error)
+{
+    const size_t n = (size_t)width * height;
+    std::vector<float> b(n), g(n), r(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        r[i] = rgb[i * 3 + 0];
+        g[i] = rgb[i * 3 + 1];
+        b[i] = rgb[i * 3 + 2];
+    }
+
+    EXRHeader header;
+    InitEXRHeader(&header);
+    EXRImage image;
+    InitEXRImage(&image);
+
+    float* planes[3] = { b.data(), g.data(), r.data() };   // alphabetical: B, G, R
+    image.images = reinterpret_cast<unsigned char**>(planes);
+    image.num_channels = 3;
+    image.width = width;
+    image.height = height;
+
+    EXRChannelInfo channels[3];
+    std::memset(channels, 0, sizeof(channels));
+    channels[0].name[0] = 'B';
+    channels[1].name[0] = 'G';
+    channels[2].name[0] = 'R';
+    int pixel_types[3] = { TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT };
+    int requested[3] = { TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF };
+    header.num_channels = 3;
+    header.channels = channels;
+    header.pixel_types = pixel_types;
+    header.requested_pixel_types = requested;
+    header.compression_type = TINYEXR_COMPRESSIONTYPE_ZIP;
+
+    const char* msg = NULL;
+    const int rc = SaveEXRImageToFile(&image, &header, path.c_str(), &msg);
+    if (rc != TINYEXR_SUCCESS)
+    {
+        error = msg ? msg : "EXR write failed";
+        if (msg) FreeEXRErrorMessage(msg);
+        return false;
+    }
+    return true;
+}
+
 static int FindChannel(const std::vector<std::string>& names, const char* want)
 {
     for (size_t i = 0; i < names.size(); ++i)

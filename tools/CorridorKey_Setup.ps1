@@ -236,9 +236,16 @@ function Do-ManageCache {
     while ($true) {
         Write-Host ''
         Write-Host "Scanning $root ..." -ForegroundColor Cyan
-        $keys = @(Get-ChildItem $root -Directory | ForEach-Object { Get-KeyInfo $_ } |
+        $keys = @(Get-ChildItem $root -Directory | Where-Object { $_.Name -notlike '_*' } |
+                  ForEach-Object { Get-KeyInfo $_ } |
                   Where-Object { $_.Source -or $_.Frames -gt 0 } | Sort-Object Modified)
-        if ($keys.Count -eq 0) { Write-Host '  No cached keys.'; return }
+        $previewDir = Join-Path $root '_preview'
+        $previewBytes = 0
+        if (Test-Path $previewDir) {
+            $previewBytes = (Get-ChildItem $previewDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+            if (-not $previewBytes) { $previewBytes = 0 }
+        }
+        if ($keys.Count -eq 0 -and $previewBytes -eq 0) { Write-Host '  No cached keys.'; return }
 
         $total = 0
         Write-Host ''
@@ -250,12 +257,23 @@ function Do-ManageCache {
             Write-Host ('  {0,3}  {1,-34} {2,6} {3,7:N2} GB  {4:yyyy-MM-dd} {5,-11} {6}' -f ($i + 1), $k.Name, $k.Frames, ($k.Bytes / 1GB), $k.Modified, $k.State, $src) -ForegroundColor $color
         }
         Write-Host ('  Total: {0:N2} GB in {1} keys' -f ($total / 1GB), $keys.Count)
+        Write-Host ('  Preview Frame results: {0:N2} GB' -f ($previewBytes / 1GB))
         Write-Host ''
         Write-Host '  Numbers (e.g. 1,3-5) = delete those    M = delete keys whose source is missing'
-        Write-Host '  O = delete keys older than N days      F = open folder    Enter = back'
+        Write-Host '  O = delete keys older than N days      P = clear Preview Frame results'
+        Write-Host '  F = open folder                        Enter = back'
         $c = ("" + (Read-Host 'Choose')).Trim().ToUpper()
         if (-not $c) { return }
         if ($c -eq 'F') { Start-Process explorer.exe $root; continue }
+        if ($c -eq 'P') {
+            if ($previewBytes -eq 0) { Write-Host '  No previews to clear.'; continue }
+            $ok = '' + (Read-Host ('Clear {0:N2} GB of previews? (y/N)' -f ($previewBytes / 1GB)))
+            if ($ok.Trim().ToLower() -eq 'y') {
+                try { Remove-Item -LiteralPath $previewDir -Recurse -Force -ErrorAction Stop; Write-Host '  cleared' -ForegroundColor Green }
+                catch { Write-Host "  couldn't clear: $($_.Exception.Message)" -ForegroundColor Red }
+            }
+            continue
+        }
 
         $doomed = @()
         if ($c -eq 'M') { $doomed = @($keys | Where-Object { $_.Source -and -not $_.SourceOK }) }

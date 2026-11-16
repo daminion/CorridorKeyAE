@@ -2,6 +2,7 @@
 
 #include "CorridorKeyAE.h"
 #include "CK_Job.h"
+#include "CK_Preview.h"
 
 #include <adobesdk/DrawbotSuite.h>
 
@@ -20,6 +21,7 @@ namespace
         std::string key;      // job folder ("" = never keyed)
         std::string text;
         CK_JobState state = CK_JOB_NONE;
+        CK_JobState colour = CK_JOB_NONE;   // which colour to draw the text in
     };
 
     StatusInfo GetStatus(PF_InData* in_data, PF_ParamDef* params[])
@@ -31,7 +33,30 @@ namespace
         info.key = data.job_dir;
         CK_JobStatus st = CK_QueryJob(info.key);
         info.state = st.state;
+        info.colour = st.state;
         info.text = CK_StatusText(st, data.frames_total);
+
+        // Until a key is finished, say what the preview helper is doing.
+        if (data.preview_token > 0 && st.state != CK_JOB_RUNNING && st.state != CK_JOB_DONE)
+        {
+            switch (CK_PreviewQuery())
+            {
+                case CK_PV_LOADING:
+                    info.text = "Preview: loading model (about a minute)...";
+                    info.colour = CK_JOB_RUNNING;     // amber
+                    break;
+                case CK_PV_READY:
+                    info.text = "Preview ready - Key Clip for the final key";
+                    break;
+                case CK_PV_FAILED:
+                    info.text = "Preview failed - click Preview Frame for the log";
+                    info.colour = CK_JOB_FAILED;      // red
+                    break;
+                default:
+                    info.text = "Preview stopped - click Preview Frame to restart";
+                    break;
+            }
+        }
         return info;
     }
 
@@ -94,7 +119,7 @@ static PF_Err DrawStatus(PF_InData* in_data,
         ERR(db.drawbot_suiteP->GetSupplier(drawing_ref, &supplier_ref));
         ERR(db.drawbot_suiteP->GetSurface(drawing_ref, &surface_ref));
 
-        DRAWBOT_ColorRGBA color = ColorFor(info.state);
+        DRAWBOT_ColorRGBA color = ColorFor(info.colour);
         float font_size = 11.0f;
         ERR(db.supplier_suiteP->NewBrush(supplier_ref, &color, &brush_ref));
         ERR(db.supplier_suiteP->GetDefaultFontSize(supplier_ref, &font_size));

@@ -21,6 +21,11 @@ bool CK_ReadExr(const std::string& path,
                 int& width, int& height,
                 std::string& error);
 
+// Writes interleaved RGB floats (row 0 = top) as a half-float ZIP EXR with
+// channels B,G,R, the layout CorridorKey's own EXRs use.
+bool CK_WriteExrRGB(const std::string& path, int width, int height,
+                    const float* rgb, std::string& error);
+
 // Builds a frame from fg (B,G,R) and alpha (Y / A / single channel) EXRs.
 bool CK_LoadFramePair(const std::string& fg_path,
                       const std::string& alpha_path,

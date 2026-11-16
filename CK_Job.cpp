@@ -165,6 +165,12 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
         if (req.exact_hint)
             key += "|nocarry";
     }
+    if (req.rendered)
+    {
+        std::snprintf(settings, sizeof(settings), "|rend=%016llx|lin=%d",
+                      req.render_hash, req.rendered_linear ? 1 : 0);
+        key += settings;
+    }
     if (req.trimmed)
     {
         // Untrimmed keys keep the same id as before trimming existed.
@@ -232,7 +238,19 @@ bool CK_StartJob(const std::string& job_dir,
     const std::string trim_dir = job_dir + "\\frames";
     char num[64];
 
-    if (req.trimmed)
+    if (!req.prerendered_dir.empty())
+    {
+        // Frames AE already rendered (only the keyed range): just move them in.
+        CK_RemoveTree(trim_dir);
+        if (!CK_MoveDir(req.prerendered_dir, trim_dir))
+        {
+            error = "Couldn't move the rendered frames into:\n  " + trim_dir;
+            return false;
+        }
+        input = trim_dir;
+        frame_dir = true;
+    }
+    else if (req.trimmed)
     {
         if (!CK_MakeDirs(trim_dir))
         {
@@ -327,8 +345,9 @@ bool CK_StartJob(const std::string& job_dir,
     {
         std::snprintf(num, sizeof(num), " --frame_dir_fps %.6f", req.fps);
         args += num;
-        if (Lower(req.source_path).size() > 4 &&
-            Lower(req.source_path).compare(req.source_path.size() - 4, 4, ".exr") == 0)
+        const bool exr_source = !req.rendered && Lower(req.source_path).size() > 4 &&
+            Lower(req.source_path).compare(req.source_path.size() - 4, 4, ".exr") == 0;
+        if (exr_source || (req.rendered && req.rendered_linear))
             args += " --frame_dir_linear";
     }
 
@@ -342,7 +361,7 @@ bool CK_StartJob(const std::string& job_dir,
     cmd += ") > " + Quote(CK_JobLogPath(job_dir)) + " 2>&1";
     cmd += " && (type nul > " + Quote(job_dir + "\\done.flag") + ")";
     cmd += " || (type nul > " + Quote(job_dir + "\\failed.flag") + ")";
-    if (req.trimmed)
+    if (req.trimmed || req.rendered)
         cmd += " & rmdir /s /q " + Quote(trim_dir) + " 2>nul";   // drop the temporary frames
 
     unsigned long pid = 0;
