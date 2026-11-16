@@ -1,4 +1,4 @@
-# CorridorKey AE
+# CorridorKey_MinionsTake
 
 Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0) by Corridor Digital (keying model by Zachary Harris). Not affiliated with Corridor Digital. CorridorKey is licensed under their modified CC BY-NC-SA 4.0 terms. If this is ever shared, it must stay free, keep the CorridorKey name and use the same license.
 
