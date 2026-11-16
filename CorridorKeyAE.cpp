@@ -1497,10 +1497,37 @@ static PF_Err DoPreviewFrame(PF_InData* in_data, PF_OutData* out_data, PF_ParamD
         (info.state == CK_PR_QUEUED || info.state == CK_PR_RUNNING))
         return err;
 
+    // The hint (any Hint Source) at the clicked frame, built now on the main
+    // thread; the render that keys the frame picks it up by token.
+    std::string hint_png;
+    if (params[CK_HINT_SOURCE]->u.pd.value != CK_HS_OFF)
+    {
+        CK_JobRequest hreq;
+        std::string error;
+        if (GetLayerSource(in_data, params[CK_KEY_SOURCE]->u.pd.value, hreq, error))
+        {
+            hreq.start_frame = (int)std::floor((double)in_data->current_time / in_data->time_scale *
+                                               hreq.fps + 1e-3);
+            bool ok = true;
+            if (params[CK_HINT_SOURCE]->u.pd.value == CK_HS_MASK)
+                ok = BuildHint(in_data, params, hreq, error);
+            else
+                ok = BuildHintFromLayer(in_data, out_data, hreq, false, error, 0);
+            if (!ok)
+            {
+                CK_ShowMessage(title, error);
+                return err;
+            }
+            hint_png = hreq.hint_png;
+        }
+    }
+
     data.preview_time = in_data->current_time;
     data.preview_scale = in_data->time_scale;
     data.preview_comp_frame = comp_frame;
     data.preview_token++;
+    CK_PreviewSetHint((unsigned long)data.preview_owner, data.preview_token, hint_png,
+                      (float)(params[CK_HINT_QUALITY]->u.fs_d.value / 100.0));
     CK_PreviewNote((unsigned long)data.preview_owner, data.preview_token, CK_PR_QUEUED);
     err = CK_WriteEffectData(in_data, params, data);
     out_data->out_flags |= PF_OutFlag_REFRESH_UI;
@@ -1738,13 +1765,23 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
     if (!CK_DirExists(cache_root) && !CK_MakeDirs(cache_root))
         return nullptr;
 
-    const unsigned long long h = HashWorld(inW, fmt, srgb ? 1ULL : 2ULL);
+    const bool clicked = IsPreviewTime(in_data, data);
+    const unsigned long owner = (unsigned long)data.preview_owner;
+
+    // A hinted preview is a different result from an unhinted one.
+    std::string hint_png;
+    float hint_quality = 0.95f;
+    const bool hinted = CK_PreviewGetHint(owner, data.preview_token, hint_png, hint_quality);
+
+    unsigned long long h = HashWorld(inW, fmt, srgb ? 1ULL : 2ULL);
+    if (hinted)
+    {
+        h = HashBytes(hint_png.data(), hint_png.size(), h);
+        h = HashBytes(&hint_quality, sizeof(hint_quality), h);
+    }
     char hex[24];
     std::snprintf(hex, sizeof(hex), "%016llx", h);
     const std::string dir = cache_root + "\\_preview\\" + hex;
-
-    const bool clicked = IsPreviewTime(in_data, data);
-    const unsigned long owner = (unsigned long)data.preview_owner;
 
     std::shared_ptr<const CK_Frame> frame = CK_GetKeyedFrame(dir, 0, 0);
 
@@ -1781,9 +1818,11 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
     std::vector<float> rgb;
     ReadWorldRGB(inW, fmt, false, false, rgb);
     std::string error;
+    const std::string hint_path = hinted ? dir + "\\hint.png" : std::string();
     const bool ok = CK_MakeDirs(in_dir) &&
         CK_WriteExrRGB(in_dir + "\\f_000000.exr", inW->width, inW->height, rgb.data(), error) &&
-        CK_PreviewKey(in_dir, dir, !srgb, error);
+        (!hinted || CK_WriteTextFile(hint_path, hint_png)) &&
+        CK_PreviewKey(in_dir, dir, !srgb, error, hint_path, hint_quality, inW->width, inW->height);
 
     frame = ok ? CK_GetKeyedFrame(dir, 0, 0) : nullptr;
     CK_RemoveTree(in_dir);   // the input frame isn't needed once keyed

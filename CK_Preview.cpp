@@ -141,7 +141,9 @@ void CK_PreviewStop()
 }
 
 bool CK_PreviewKey(const std::string& input_dir, const std::string& output_dir,
-                   bool linear, std::string& error)
+                   bool linear, std::string& error,
+                   const std::string& hint_path, float hint_quality,
+                   int width, int height)
 {
     int port = 0;
     if (QueryNow(port) != CK_PV_READY)
@@ -149,9 +151,17 @@ bool CK_PreviewKey(const std::string& input_dir, const std::string& output_dir,
         error = "preview helper isn't ready";
         return false;
     }
-    const std::string req = "{\"cmd\": \"key\", \"input_dir\": \"" + JsonEscape(input_dir) +
-                            "\", \"output_dir\": \"" + JsonEscape(output_dir) +
-                            "\", \"linear\": " + (linear ? "true" : "false") + "}";
+    std::string req = "{\"cmd\": \"key\", \"input_dir\": \"" + JsonEscape(input_dir) +
+                      "\", \"output_dir\": \"" + JsonEscape(output_dir) +
+                      "\", \"linear\": " + (linear ? "true" : "false");
+    if (!hint_path.empty())
+    {
+        char extra[128];
+        std::snprintf(extra, sizeof(extra), ", \"hint_quality\": %.3f, \"width\": %d, \"height\": %d",
+                      hint_quality, width, height);
+        req += ", \"hint\": \"" + JsonEscape(hint_path) + "\"" + extra;
+    }
+    req += "}";
     std::string reply;
     // Generous: the first frame after loading includes GPU warm-up.
     if (!CK_TcpRequest(port, req, 180000, reply))
@@ -261,4 +271,45 @@ void CK_PreviewEndDir(const std::string& dir)
         g_dirs.erase(dir);
     }
     g_dir_cv.notify_all();
+}
+
+// ---------------------------------------------------------------------------
+// Per-click hints
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    struct Hint
+    {
+        long token = 0;
+        std::string png;
+        float quality = 0.95f;
+    };
+    std::mutex g_hint_mutex;
+    std::map<unsigned long, Hint> g_hints;
+}
+
+void CK_PreviewSetHint(unsigned long owner, long token, const std::string& png, float quality)
+{
+    std::lock_guard<std::mutex> lock(g_hint_mutex);
+    if (png.empty())
+    {
+        g_hints.erase(owner);
+        return;
+    }
+    Hint& h = g_hints[owner];
+    h.token = token;
+    h.png = png;
+    h.quality = quality;
+}
+
+bool CK_PreviewGetHint(unsigned long owner, long token, std::string& png, float& quality)
+{
+    std::lock_guard<std::mutex> lock(g_hint_mutex);
+    auto it = g_hints.find(owner);
+    if (it == g_hints.end() || it->second.token != token)
+        return false;
+    png = it->second.png;
+    quality = it->second.quality;
+    return true;
 }

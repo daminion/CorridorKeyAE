@@ -19,7 +19,7 @@ Notes for picking this project up in a new session. README.md covers what the ef
 - **PiPL outflags must match GlobalSetup.**
   - out_flags = 33587200 (DEEP_COLOR_AWARE + CUSTOM_UI)
   - out_flags2 = 136320000 (0x8201400: THREADED_RENDERING + I_MIX_GUID_DEPENDENCIES 0x200000 + FLOAT_COLOR_AWARE + SMART_RENDER)
-- **Version:** `MAJOR_VERSION`/`MINOR_VERSION` in CorridorKeyAE.h and `AE_Effect_Version` in the PiPL move together: (MAJOR << 19) + (MINOR << 15). MINOR is only 4 bits, so it goes 0-15, then MAJOR goes up (0.16 overflowed and AE reported a version mismatch). Current: **1.3 = 622592**.
+- **Version:** `MAJOR_VERSION`/`MINOR_VERSION` in CorridorKeyAE.h and `AE_Effect_Version` in the PiPL move together: (MAJOR << 19) + (MINOR << 15). MINOR is only 4 bits, so it goes 0-15, then MAJOR goes up (0.16 overflowed and AE reported a version mismatch). Current: **1.4 = 655360**.
 - **Disk IDs** are append-only. Retired IDs stay listed in the enum and are never reused. Parameter *indices* can be reordered freely.
 - **Popup choices** are stored 1-based, so new choices are appended at the end (e.g. Despill Method "Off" = 4).
 - **`CK_EffectData`** (flattened into the Status arb param) is a fixed POD struct. New fields come out of `reserved[]`; unflatten zero-fills anything an older project doesn't have.
@@ -67,6 +67,7 @@ Notes for picking this project up in a new session. README.md covers what the ef
 - **Built, not yet tested:** sequence key IDs also hash file count + middle + last frame stamps (changes existing sequence key IDs only).
 - **Not chosen:** alpha-only keys (Eric wants CorridorKey's fg edge colour); DWAA (tinyexr can't read it). PNG 16 ruled out (keys are already half-float; PNG clips > 1.0).
 - **Built, not yet tested (v1.3): Matte Layer (current frame)** (Hint Source choice 5). Key Clip takes the frame under the time indicator (`in_data->current_time`) as `req.ref_index` in the keyed range and renders the Matte Layer there. If ref > 0: forces `trimmed` (so the input is always `<key>\\frames`), adds `|ref=N` to the key ID and launches ck_infer_ref.py instead of infer.py. `CK_QueryJob` counts frames in `_ref_out_fwd`/`_ref_out_bwd` while the passes run. Linux tests: the join mapping (ref in the middle, last, first, 1-frame clip) with a stand-in infer.py, and the Status text for a two-pass log. Never run against real CorridorKey.
+- **Built, not yet tested (v1.4): hinted Preview Frame.** Before v1.4 the preview helper never got a hint (Eric saw his masked areas come back). `DoPreviewFrame` now builds the hint at the clicked frame for any Hint Source (`BuildHint` / `BuildHintFromLayer` with `start_frame` = clicked source frame) and stores the PNG with `CK_PreviewSetHint(owner, token)`. `GetPreviewFrame` mixes the hint into the preview folder hash, writes `<preview>\\hint.png` and passes path, Hint Strength and the input size. ck_preview_server.py resizes the hint to that size (cv2 INTER_AREA) and passes it as `initial_hint_path`.
 - **Removed (v1.3): Key Resolution** (v1.2). `KEY_RES_DISK_ID` stays listed as retired. Eric prefers to precomp and scale. Note for the future: CorridorKey 485f5e9's `--model_scale` != 1 raises in `_resize_output_torch` (the output upscale isn't implemented).
 - **Known gap:** neither loading line has a percentage, because CorridorKey doesn't report any while it loads.
 

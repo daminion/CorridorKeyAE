@@ -107,15 +107,33 @@ def main():
                 t0 = time.time()
                 try:
                     out_dir = Path(req["output_dir"])
+                    out_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Optional hint (Hint Source at the clicked frame). The plug-in
+                    # builds it at source size; CorridorKey needs it at the size of
+                    # the frame being keyed (AE's preview resolution).
+                    hint_path = None
+                    if req.get("hint"):
+                        import cv2
+                        img = cv2.imread(req["hint"], cv2.IMREAD_GRAYSCALE)
+                        if img is None:
+                            raise RuntimeError("couldn't read the hint " + req["hint"])
+                        w, h = int(req.get("width", 0)), int(req.get("height", 0))
+                        if w > 0 and h > 0 and img.shape[:2] != (h, w):
+                            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+                        hint_path = str(out_dir / "hint_sized.png")
+                        cv2.imwrite(hint_path, img)
+
                     cfg = InferenceConfig(
                         hann_chunk=1, hann_stride=1, auto_vram=False,
                         carry_hint=False, num_frames=1,
                         outputs={"alpha", "fg"},
                         output_format="exr", exr_dtype="half",
                         frame_dir_linear=bool(req.get("linear", False)),
+                        hint_quality=float(req.get("hint_quality", 0.95)),
                         temp_dir=out_dir / "tmp")
                     run_inference(model, req["input_dir"], str(out_dir), cfg,
-                                  WriterConfig(), initial_hint_path=None,
+                                  WriterConfig(), initial_hint_path=hint_path,
                                   hint_video_path=None)
                     reply = {"ok": True}
                     log(f"keyed {req['input_dir']} in {time.time() - t0:.1f}s")

@@ -27,8 +27,17 @@ void CK_PreviewStop();
 std::string CK_PreviewLogPath();
 
 // Keys the single frame in input_dir into output_dir (blocks until done).
+// hint_path: optional hint PNG file (any size; the helper resizes it to
+// width x height, the size of the frame being keyed).
 bool CK_PreviewKey(const std::string& input_dir, const std::string& output_dir,
-                   bool linear, std::string& error);
+                   bool linear, std::string& error,
+                   const std::string& hint_path = std::string(), float hint_quality = 0.95f,
+                   int width = 0, int height = 0);
+
+// The hint for an effect's Preview Frame click (built on the main thread at
+// the click; used by the render that keys that frame). PNG bytes at source size.
+void CK_PreviewSetHint(unsigned long owner, long token, const std::string& png, float quality);
+bool CK_PreviewGetHint(unsigned long owner, long token, std::string& png, float& quality);
 
 // ---- per-request status (for the Status line) --------------------------
 
