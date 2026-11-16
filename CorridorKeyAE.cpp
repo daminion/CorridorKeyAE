@@ -563,6 +563,8 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
 // Effect data access (the Status arbitrary param)
 // ---------------------------------------------------------------------------
 
+static void SetPathField(char* field, const std::string& value);   // below
+
 bool CK_ReadEffectData(PF_InData* in_data, PF_ParamDef* params[], CK_EffectData* out)
 {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
