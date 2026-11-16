@@ -218,8 +218,10 @@ static PF_Err IdleStatus(PF_InData* in_data,
         std::lock_guard<std::mutex> lock(g_mutex);
         auto it = g_last_drawn.find(info.key);
         changed = (it == g_last_drawn.end() || it->second != info.text);
+        // Running text starts "Keying..." or, for two-pass keys, "Pass i/N".
         just_finished = it != g_last_drawn.end() &&
-                        it->second.compare(0, 6, "Keying") == 0 &&
+                        (it->second.compare(0, 6, "Keying") == 0 ||
+                         it->second.compare(0, 5, "Pass ") == 0) &&
                         info.state == CK_JOB_DONE;
     }
 

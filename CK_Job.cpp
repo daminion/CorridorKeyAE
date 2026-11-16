@@ -531,8 +531,11 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
     {
         st.frames_done = CK_CountExrInSubdir(job_dir, "_fg_exr");
         if (st.frames_done == 0)   // reference-frame key still in its passes
+        {
             st.frames_done = CK_CountExrInSubdir(job_dir + "\\_ref_out_fwd", "_fg_exr") +
                              CK_CountExrInSubdir(job_dir + "\\_ref_out_bwd", "_fg_exr");
+            st.in_passes = st.frames_done > 0;
+        }
 
         if (CK_FileExists(job_dir + "\\done.flag"))
         {

@@ -87,6 +87,8 @@ struct CK_JobStatus
     int windows_done = 0;
     int windows_total = 0;
     long elapsed_s = -1;    // since the job started (-1 = unknown)
+    bool in_passes = false; // reference-frame key: frames_done counts pass outputs, which
+                            // aren't in the key folder until the passes are joined
     int pass = 0;           // reference-frame keys: pass i of pass_total (0 = single pass)
     int pass_total = 0;
     bool pass_backward = false;

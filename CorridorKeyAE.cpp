@@ -1684,7 +1684,7 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                 // While running, the newest file may still be mid-write.
                 mix.compacted = st.compacted ? 1 : 0;
                 mix.available = (st.state == CK_JOB_DONE) ||
-                                (st.state == CK_JOB_RUNNING && index >= 0 &&
+                                (st.state == CK_JOB_RUNNING && !st.in_passes && index >= 0 &&
                                  index < st.frames_done - 1);
             }
             ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(mix), &mix));
