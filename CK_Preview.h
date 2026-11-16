@@ -19,6 +19,9 @@ enum CK_PreviewState
 // Cached for ~0.5 s, safe to call from render and UI threads.
 CK_PreviewState CK_PreviewQuery();
 
+// Seconds since the helper was started, while it's loading (-1 otherwise).
+long CK_PreviewLoadingSeconds();
+
 bool CK_PreviewStart(const CK_GlobalSettings& gs, std::string& error);
 void CK_PreviewStop();
 std::string CK_PreviewLogPath();

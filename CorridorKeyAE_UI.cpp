@@ -65,7 +65,12 @@ namespace
             }
             else if (helper == CK_PV_LOADING)
             {
-                std::snprintf(buf, sizeof(buf), "Preview frame %d: loading model (about a minute)...", f);
+                const long s = CK_PreviewLoadingSeconds();
+                if (s >= 0)
+                    std::snprintf(buf, sizeof(buf), "Preview frame %d: loading model (about a minute)...  %ld:%02ld",
+                                  f, s / 60, s % 60);
+                else
+                    std::snprintf(buf, sizeof(buf), "Preview frame %d: loading model (about a minute)...", f);
                 info.colour = CK_JOB_RUNNING;
             }
             else if (have && req.state == CK_PR_QUEUED)

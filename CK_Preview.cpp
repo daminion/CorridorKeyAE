@@ -78,6 +78,13 @@ CK_PreviewState CK_PreviewQuery()
     return g_state;
 }
 
+long CK_PreviewLoadingSeconds()
+{
+    if (CK_PreviewQuery() != CK_PV_LOADING)
+        return -1;
+    return CK_FileAgeSeconds(PidFile());   // pid.txt is written at launch
+}
+
 bool CK_PreviewStart(const CK_GlobalSettings& gs, std::string& error)
 {
     int port = 0;

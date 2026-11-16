@@ -56,16 +56,16 @@ Notes for picking this project up in a new session. README.md covers what the ef
 ## Status
 
 - **Verified in AE:** keying, live progress, per-click Preview Frame status, precomp keying, the v0.13 analysis feedback, and the v0.14 cache location (Eric: "working nicely so far").
-- **Known gap:** Preview Frame's model loading shows "loading model (about a minute)..." with no timer. Key Clip shows "Keying... starting / loading model" with a timer, but no percentage, because CorridorKey doesn't report any while it loads.
+- **Built, not yet tested:** Preview Frame's "loading model" line now shows an elapsed timer (pid.txt age via `CK_PreviewLoadingSeconds`; the idle hook redraws every pass while the helper is loading).
+- **Known gap:** neither loading line has a percentage, because CorridorKey doesn't report any while it loads.
 
 ## Ideas not yet built (roughly in priority order)
 
-1. Elapsed timer on Preview Frame's "loading model" line (the helper's pid.txt age gives it).
-2. Internal Resolution (`--model_scale`) for faster draft keys.
-3. "Input is Linear" override for EXR plates.
-4. Auto hint with a threshold.
-5. Reference Frame: key both directions from a chosen frame.
-6. The setup menu's cache manager only knows the global cache. It could also scan a chosen project's `CorridorKeys` folder.
+1. Internal Resolution (`--model_scale`) for faster draft keys.
+2. "Input is Linear" override for EXR plates.
+3. Auto hint with a threshold.
+4. Reference Frame: key both directions from a chosen frame.
+5. The setup menu's cache manager only knows the global cache. It could also scan a chosen project's `CorridorKeys` folder.
 
 Also pending: Eric plans to move Better Feather into the Minion effects category himself, later.
 

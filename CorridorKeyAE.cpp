@@ -272,7 +272,9 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
     static unsigned long last_info = 0;
     const CK_PreviewState preview = CK_PreviewQuery();
     const unsigned long info = CK_PreviewInfoVersion();
-    const bool preview_changed = preview != last_preview || info != last_info;
+    // While the helper loads, redraw every pass so its timer ticks.
+    const bool preview_changed = preview != last_preview || info != last_info ||
+                                 preview == CK_PV_LOADING;
     last_preview = preview;
     last_info = info;
 
