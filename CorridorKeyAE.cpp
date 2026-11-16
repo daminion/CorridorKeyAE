@@ -235,9 +235,12 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
     last = now;
 
     static CK_PreviewState last_preview = CK_PV_OFF;
+    static unsigned long last_info = 0;
     const CK_PreviewState preview = CK_PreviewQuery();
-    const bool preview_changed = preview != last_preview;
+    const unsigned long info = CK_PreviewInfoVersion();
+    const bool preview_changed = preview != last_preview || info != last_info;
     last_preview = preview;
+    last_info = info;
 
     if ((CK_PollTrackedJobs() || preview_changed) && S_basic)
     {
@@ -1296,9 +1299,37 @@ static PF_Err DoPreviewFrame(PF_InData* in_data, PF_OutData* out_data, PF_ParamD
         }
     }
 
+    if (!data.preview_owner)
+        data.preview_owner = (A_long)((CK_TickMs() * 2654435761u) | 1u);
+
+    // Comp frame number, for the Status line.
+    A_long comp_frame = 0;
+    {
+        AEGP_SuiteHandler suites(in_data->pica_basicP);
+        AEGP_LayerH layerH = NULL;
+        A_Time lt = { in_data->current_time, (A_u_long)in_data->time_scale };
+        A_Time ct = lt;
+        if (!suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layerH) && layerH)
+            suites.LayerSuite9()->AEGP_ConvertLayerToCompTime(layerH, &lt, &ct);
+        if (ct.scale && in_data->time_step)
+            comp_frame = (A_long)std::floor((double)ct.value / ct.scale *
+                                            in_data->time_scale / in_data->time_step + 1e-3);
+    }
+
+    // Already previewing this frame: the Status line shows progress, so a
+    // second click does nothing.
+    CK_PreviewReqInfo info;
+    if (data.preview_token > 0 && comp_frame == data.preview_comp_frame &&
+        CK_PreviewInfo((unsigned long)data.preview_owner, info) &&
+        info.token == data.preview_token &&
+        (info.state == CK_PR_QUEUED || info.state == CK_PR_RUNNING))
+        return err;
+
     data.preview_time = in_data->current_time;
     data.preview_scale = in_data->time_scale;
+    data.preview_comp_frame = comp_frame;
     data.preview_token++;
+    CK_PreviewNote((unsigned long)data.preview_owner, data.preview_token, CK_PR_QUEUED);
     err = CK_WriteEffectData(in_data, params, data);
     out_data->out_flags |= PF_OutFlag_REFRESH_UI;
     return err;
@@ -1554,9 +1585,22 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
     std::snprintf(hex, sizeof(hex), "%016llx", h);
     const std::string dir = cache_root + "\\_preview\\" + hex;
 
+    const bool clicked = IsPreviewTime(in_data, data);
+    const unsigned long owner = (unsigned long)data.preview_owner;
+
     std::shared_ptr<const CK_Frame> frame = CK_GetKeyedFrame(dir, 0, 0);
-    if (frame || !IsPreviewTime(in_data, data) || CK_PreviewQuery() != CK_PV_READY)
+    if (frame || !clicked || CK_PreviewQuery() != CK_PV_READY)
+    {
+        if (frame && clicked)
+            CK_PreviewNote(owner, data.preview_token, CK_PR_DONE);   // previewed before
         return frame;
+    }
+
+    // Another render of this same frame may already be keying it.
+    if (!CK_PreviewBeginDir(dir))
+        return CK_GetKeyedFrame(dir, 0, 0);
+
+    CK_PreviewNote(owner, data.preview_token, CK_PR_RUNNING);
 
     // Same values CorridorKey reads from a file: display values for an sRGB
     // project, scene-linear for a linear one.
@@ -1564,12 +1608,14 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
     std::vector<float> rgb;
     ReadWorldRGB(inW, fmt, false, false, rgb);
     std::string error;
-    if (!CK_MakeDirs(in_dir) ||
-        !CK_WriteExrRGB(in_dir + "\\f_000000.exr", inW->width, inW->height, rgb.data(), error) ||
-        !CK_PreviewKey(in_dir, dir, !srgb, error))
-        return nullptr;
+    const bool ok = CK_MakeDirs(in_dir) &&
+        CK_WriteExrRGB(in_dir + "\\f_000000.exr", inW->width, inW->height, rgb.data(), error) &&
+        CK_PreviewKey(in_dir, dir, !srgb, error);
 
-    return CK_GetKeyedFrame(dir, 0, 0);
+    frame = ok ? CK_GetKeyedFrame(dir, 0, 0) : nullptr;
+    CK_PreviewNote(owner, data.preview_token, frame ? CK_PR_DONE : CK_PR_FAILED);
+    CK_PreviewEndDir(dir);
+    return frame;
 }
 
 static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,

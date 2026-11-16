@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 11
+#define MINOR_VERSION 12
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -44,7 +44,9 @@ typedef struct CK_EffectData
     A_long preview_time;                // Preview Frame: layer time to preview...
     A_long preview_scale;               // ...in this time scale
     A_long preview_token;               // bumps on every Preview Frame click (0 = never)
-    A_long reserved[3];
+    A_long preview_owner;               // per-effect id for the Status line's preview info
+    A_long preview_comp_frame;          // comp frame number that was clicked (for display)
+    A_long reserved[1];
 } CK_EffectData;
 
 // Parameter order (indices). Saved projects are matched by disk ID, not by

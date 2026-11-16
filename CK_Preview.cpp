@@ -159,3 +159,99 @@ bool CK_PreviewKey(const std::string& input_dir, const std::string& output_dir,
     }
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// Per-request status and single-flight per preview folder
+// ---------------------------------------------------------------------------
+
+#include <chrono>
+#include <condition_variable>
+#include <map>
+#include <set>
+
+namespace
+{
+    struct Req
+    {
+        long token = 0;
+        CK_PreviewReqState state = CK_PR_NONE;
+        unsigned long started = 0;
+        double seconds = 0.0;
+    };
+
+    std::mutex g_req_mutex;
+    std::map<unsigned long, Req> g_reqs;
+    unsigned long g_version = 1;
+
+    std::mutex g_dir_mutex;
+    std::condition_variable g_dir_cv;
+    std::set<std::string> g_dirs;
+}
+
+void CK_PreviewNote(unsigned long owner, long token, CK_PreviewReqState state)
+{
+    if (!owner) return;
+    std::lock_guard<std::mutex> lock(g_req_mutex);
+    Req& r = g_reqs[owner];
+    if (token < r.token) return;              // a newer click already replaced it
+    const unsigned long now = CK_TickMs();
+    const bool same = r.token == token;
+    switch (state)
+    {
+        case CK_PR_RUNNING:
+            if (!(same && r.state == CK_PR_RUNNING)) r.started = now ? now : 1;
+            break;
+        case CK_PR_DONE:
+        case CK_PR_FAILED:
+            r.seconds = (same && r.started) ? (now - r.started) / 1000.0 : 0.0;
+            break;
+        default:
+            r.started = 0;
+            r.seconds = 0.0;
+            break;
+    }
+    r.token = token;
+    r.state = state;
+    ++g_version;
+}
+
+bool CK_PreviewInfo(unsigned long owner, CK_PreviewReqInfo& info)
+{
+    std::lock_guard<std::mutex> lock(g_req_mutex);
+    auto it = g_reqs.find(owner);
+    if (it == g_reqs.end()) return false;
+    info.token = it->second.token;
+    info.state = it->second.state;
+    info.seconds = it->second.state == CK_PR_RUNNING
+                       ? (CK_TickMs() - it->second.started) / 1000.0
+                       : it->second.seconds;
+    return true;
+}
+
+unsigned long CK_PreviewInfoVersion()
+{
+    std::lock_guard<std::mutex> lock(g_req_mutex);
+    bool running = false;
+    for (auto& kv : g_reqs)
+        running = running || kv.second.state == CK_PR_RUNNING;
+    // While a preview runs, tick once a second so the elapsed time updates.
+    return running ? g_version + CK_TickMs() / 1000 : g_version;
+}
+
+bool CK_PreviewBeginDir(const std::string& dir)
+{
+    std::unique_lock<std::mutex> lock(g_dir_mutex);
+    if (g_dirs.insert(dir).second)
+        return true;
+    g_dir_cv.wait_for(lock, std::chrono::minutes(3), [&] { return g_dirs.count(dir) == 0; });
+    return false;
+}
+
+void CK_PreviewEndDir(const std::string& dir)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_dir_mutex);
+        g_dirs.erase(dir);
+    }
+    g_dir_cv.notify_all();
+}

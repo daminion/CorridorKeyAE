@@ -6,6 +6,7 @@
 
 #include <adobesdk/DrawbotSuite.h>
 
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <string>
@@ -36,26 +37,47 @@ namespace
         info.colour = st.state;
         info.text = CK_StatusText(st, data.frames_total);
 
-        // Until a key is finished, say what the preview helper is doing.
+        // Until a key is finished, show this effect's last Preview Frame click.
         if (data.preview_token > 0 && st.state != CK_JOB_RUNNING && st.state != CK_JOB_DONE)
         {
-            switch (CK_PreviewQuery())
+            char buf[160];
+            const int f = (int)data.preview_comp_frame;
+            CK_PreviewReqInfo req;
+            const bool have = CK_PreviewInfo((unsigned long)data.preview_owner, req) &&
+                              req.token == data.preview_token;
+            const CK_PreviewState helper = CK_PreviewQuery();
+
+            if (have && req.state == CK_PR_RUNNING)
             {
-                case CK_PV_LOADING:
-                    info.text = "Preview: loading model (about a minute)...";
-                    info.colour = CK_JOB_RUNNING;     // amber
-                    break;
-                case CK_PV_READY:
-                    info.text = "Preview ready - Key Clip for the final key";
-                    break;
-                case CK_PV_FAILED:
-                    info.text = "Preview failed - click Preview Frame for the log";
-                    info.colour = CK_JOB_FAILED;      // red
-                    break;
-                default:
-                    info.text = "Preview stopped - click Preview Frame to restart";
-                    break;
+                std::snprintf(buf, sizeof(buf), "Previewing frame %d... %d s", f, (int)req.seconds);
+                info.colour = CK_JOB_RUNNING;
             }
+            else if (have && req.state == CK_PR_DONE)
+            {
+                std::snprintf(buf, sizeof(buf), "Preview frame %d done (%.1f s) - Key Clip for the final key",
+                              f, req.seconds);
+                info.colour = CK_JOB_DONE;
+            }
+            else if ((have && req.state == CK_PR_FAILED) || helper == CK_PV_FAILED)
+            {
+                std::snprintf(buf, sizeof(buf), "Preview frame %d failed - click Preview Frame for the log", f);
+                info.colour = CK_JOB_FAILED;
+            }
+            else if (helper == CK_PV_LOADING)
+            {
+                std::snprintf(buf, sizeof(buf), "Preview frame %d: loading model (about a minute)...", f);
+                info.colour = CK_JOB_RUNNING;
+            }
+            else if (have && req.state == CK_PR_QUEUED)
+            {
+                std::snprintf(buf, sizeof(buf), "Preview frame %d: waiting - stay on that frame", f);
+                info.colour = CK_JOB_RUNNING;
+            }
+            else
+            {
+                std::snprintf(buf, sizeof(buf), "Not keyed - Preview Frame or Key Clip");
+            }
+            info.text = buf;
         }
         return info;
     }
