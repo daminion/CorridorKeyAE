@@ -57,6 +57,7 @@ Notes for picking this project up in a new session. README.md covers what the ef
 
 - **Verified in AE:** keying, live progress, per-click Preview Frame status, precomp keying, the v0.13 analysis feedback, and the v0.14 cache location (Eric: "working nicely so far").
 - **Built, not yet tested:** Preview Frame's "loading model" line now shows an elapsed timer (pid.txt age via `CK_PreviewLoadingSeconds`; the idle hook redraws every pass while the helper is loading).
+- **Built, not yet tested:** clicking Preview Frame while the helper is loading used to sit on "waiting - stay on that frame" long after loading finished (the render had already returned the plate, and nothing re-triggered it). `GetPreviewFrame` now holds the clicked frame's render until the helper is ready (polls `PF_ABORT`, 3 min cap).
 - **Known gap:** neither loading line has a percentage, because CorridorKey doesn't report any while it loads.
 
 ## Ideas not yet built (roughly in priority order)

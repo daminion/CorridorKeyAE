@@ -14,7 +14,9 @@
 #include "CK_Preview.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 #include <cstring>
@@ -1699,6 +1701,21 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
     const unsigned long owner = (unsigned long)data.preview_owner;
 
     std::shared_ptr<const CK_Frame> frame = CK_GetKeyedFrame(dir, 0, 0);
+
+    // Clicked while the model is still loading: hold this render until the
+    // helper is ready. Returning the plate here would leave AE nothing to
+    // re-render on once loading finishes, so the frame would sit "waiting".
+    if (!frame && clicked && CK_PreviewQuery() == CK_PV_LOADING)
+    {
+        const unsigned long start = CK_TickMs();
+        while (CK_PreviewQuery() == CK_PV_LOADING && CK_TickMs() - start < 180000)
+        {
+            if (PF_ABORT(in_data))
+                return nullptr;          // user moved on; AE re-renders later
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+    }
+
     if (frame || !clicked || CK_PreviewQuery() != CK_PV_READY)
     {
         if (frame && clicked)
