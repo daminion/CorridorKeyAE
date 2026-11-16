@@ -12,7 +12,8 @@
 //   hint_frame0.png  first-frame hint (Hint Mask, or Hint Layer > First Frame)
 //   hint_frames\hint_000000.png ...  per-frame hint (Hint Layer > Every Frame)
 //   frames\ ...   trimmed source frames (removed when the key finishes)
-//   scale.txt      Key Resolution below Full: the --model_scale used
+//   _ref_in_fwd\ _ref_in_bwd\ _ref_out_fwd\ _ref_out_bwd\
+//                 reference-frame keys while running (removed when joined)
 //   compact.flag   Compact Keys was on: compact the fg once the key is done
 //   compact3.txt   next fg frame to compact (resume point)
 //   compact3.done  every fg frame has been compacted (edges-only fg with
@@ -49,7 +50,11 @@ struct CK_JobRequest
     std::string prerendered_dir;             // moved into <job>\frames by CK_StartJob
 
     bool        compact = true;              // Compact Keys (off = full-size fg, own key id)
-    float       model_scale = 1.0f;          // Key Resolution: < 1 keys a shrunk copy (draft)
+
+    // Hint at a frame other than the first (Matte Layer, current frame): its
+    // index in the keyed range. > 0 keys outward from it in two passes
+    // (tools/ck_infer_ref.py); the input is always a frame folder then.
+    int         ref_index = 0;
 };
 
 enum CK_JobState
@@ -69,7 +74,8 @@ enum CK_JobPhase
     CK_PHASE_LOADING,       // loading model weights
     CK_PHASE_PREPASS_MOTION,// RVM continuous prepass
     CK_PHASE_PREPASS_SCENE, // frozen VFM prepass
-    CK_PHASE_WINDOWS        // main pass, window by window
+    CK_PHASE_WINDOWS,       // main pass, window by window
+    CK_PHASE_JOINING        // reference-frame key: joining the two passes
 };
 
 struct CK_JobStatus
@@ -81,8 +87,10 @@ struct CK_JobStatus
     int windows_done = 0;
     int windows_total = 0;
     long elapsed_s = -1;    // since the job started (-1 = unknown)
+    int pass = 0;           // reference-frame keys: pass i of pass_total (0 = single pass)
+    int pass_total = 0;
+    bool pass_backward = false;
     bool compacted = false; // done keys: Compact Keys has finished (compact3.done)
-    float model_scale = 1.0f; // from scale.txt: < 1 = draft key
 };
 
 // <cache_root>\<clip>_<8 hex>. Hash covers the source file identity and the

@@ -1,7 +1,7 @@
 #include "CK_Job.h"
 #include "CK_Platform.h"
 #include "CK_Frames.h"
-#include "CK_InferScript.h"
+#include "CK_RefScript.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -180,13 +180,13 @@ std::string CK_JobDirFor(const std::string& cache_root, const CK_JobRequest& req
                       req.render_hash, req.rendered_linear ? 1 : 0);
         key += settings;
     }
-    if (req.model_scale < 0.999f)
-    {
-        std::snprintf(settings, sizeof(settings), "|ms=%.3f", req.model_scale);
-        key += settings;
-    }
     if (!req.compact)
-        key += "|full";   // full-size fg is a different key from a compacted one
+        key += "|full";
+    if (req.ref_index > 0)
+    {
+        std::snprintf(settings, sizeof(settings), "|ref=%d", req.ref_index);
+        key += settings;
+    }   // full-size fg is a different key from a compacted one
     if (req.is_sequence)
     {
         // A re-rendered sequence can keep its first frame's size and date, so
@@ -398,26 +398,19 @@ bool CK_StartJob(const std::string& job_dir,
 
     // Done/failed flags are written by cmd.exe itself, so they appear even
     // if After Effects has been closed in the meantime.
-    std::string infer_py = corridorkey_dir + "\\infer.py";
-    if (req.model_scale < 0.999f)
+    std::string infer = Quote(python_exe) + " " + Quote(corridorkey_dir + "\\infer.py") + args;
+    if (req.ref_index > 0)
     {
-        // Draft: CorridorKey's --model_scale needs our wrapper for its output
-        // upscale (tools/ck_infer_scaled.py). It runs infer.py unchanged.
-        const std::string wrapper = CK_LocalAppDataDir() + "\\ck_infer_scaled.py";
-        if (!CK_MakeDirs(CK_LocalAppDataDir()) || !CK_WriteTextFile(wrapper, kCK_InferScript))
+        // Two passes outward from the reference frame (tools/ck_infer_ref.py).
+        const std::string script = CK_LocalAppDataDir() + "\\ck_infer_ref.py";
+        if (!CK_MakeDirs(CK_LocalAppDataDir()) || !CK_WriteTextFile(script, kCK_RefScript))
         {
-            error = "Couldn't write the draft-key helper to:\n  " + wrapper;
+            error = "Couldn't write the reference-frame helper to:\n  " + script;
             return false;
         }
-        infer_py = wrapper;
-        std::snprintf(num, sizeof(num), " --model_scale %.3f", req.model_scale);
-        args += num;
-        std::snprintf(num, sizeof(num), "%.3f", req.model_scale);
-        CK_WriteTextFile(job_dir + "\\scale.txt", num);
+        std::snprintf(num, sizeof(num), " --ck_ref %d", req.ref_index);
+        infer = Quote(python_exe) + " " + Quote(script) + num + args;
     }
-    else
-        CK_RemoveFile(job_dir + "\\scale.txt");
-    std::string infer = Quote(python_exe) + " " + Quote(infer_py) + args;
 
     std::string cmd;
     cmd += "set PYTHONUNBUFFERED=1&& (";
@@ -481,7 +474,18 @@ void CK_ParseJobLog(const std::string& log, CK_JobStatus& st)
         if (lead == std::string::npos) continue;
         const char* l = line.c_str() + lead;
 
-        if (std::strncmp(l, "window ", 7) == 0 && std::sscanf(l + 7, "%d/%d", &a, &b) == 2 && b > 0)
+        if (std::strncmp(l, "CK pass ", 8) == 0 && std::sscanf(l + 8, "%d/%d", &a, &b) == 2)
+        {
+            // tools/ck_infer_ref.py: "CK pass 1/2 forward" - a fresh CorridorKey run
+            st.pass = a;
+            st.pass_total = b;
+            st.pass_backward = std::strstr(l, "backward") != NULL;
+            st.phase = CK_PHASE_STARTING;
+            st.windows_done = st.windows_total = 0;
+        }
+        else if (std::strncmp(l, "CK joining", 10) == 0)
+            st.phase = CK_PHASE_JOINING;
+        else if (std::strncmp(l, "window ", 7) == 0 && std::sscanf(l + 7, "%d/%d", &a, &b) == 2 && b > 0)
         {
             st.phase = CK_PHASE_WINDOWS;
             st.windows_done = a;
@@ -526,9 +530,9 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
     else
     {
         st.frames_done = CK_CountExrInSubdir(job_dir, "_fg_exr");
-        const double ms = std::atof(CK_ReadTextFile(job_dir + "\\scale.txt").c_str());
-        if (ms > 0.0 && ms < 0.999)
-            st.model_scale = (float)ms;
+        if (st.frames_done == 0)   // reference-frame key still in its passes
+            st.frames_done = CK_CountExrInSubdir(job_dir + "\\_ref_out_fwd", "_fg_exr") +
+                             CK_CountExrInSubdir(job_dir + "\\_ref_out_bwd", "_fg_exr");
 
         if (CK_FileExists(job_dir + "\\done.flag"))
         {
@@ -570,7 +574,9 @@ std::string CK_StatusText(const CK_JobStatus& st, int frames_total)
             if (st.elapsed_s >= 0)
                 std::snprintf(t, sizeof(t), "  %ld:%02ld", st.elapsed_s / 60, st.elapsed_s % 60);
 
-            if (st.frames_done <= 0)
+            if (st.phase == CK_PHASE_JOINING)
+                std::snprintf(buf, sizeof(buf), "Keying... joining passes%s", t);
+            else if (st.frames_done <= 0)
             {
                 switch (st.phase)
                 {
@@ -592,9 +598,12 @@ std::string CK_StatusText(const CK_JobStatus& st, int frames_total)
                 }
             }
             else if (frames_total > 0)
+            {
+                // Reference-frame keys write the reference frame twice.
+                const int done = st.frames_done < frames_total ? st.frames_done : frames_total;
                 std::snprintf(buf, sizeof(buf), "Keying... %d / %d frames (%d%%)%s",
-                              st.frames_done, frames_total,
-                              (int)(100.0 * st.frames_done / frames_total), t);
+                              done, frames_total, (int)(100.0 * done / frames_total), t);
+            }
             else
                 std::snprintf(buf, sizeof(buf), "Keying... %d frames%s", st.frames_done, t);
             break;
@@ -615,12 +624,12 @@ std::string CK_StatusText(const CK_JobStatus& st, int frames_total)
             std::snprintf(buf, sizeof(buf), "Not keyed - click Key Clip");
             break;
     }
-    // Draft keys say so, so they aren't mistaken for the final key.
-    if (st.model_scale < 0.999f &&
-        (st.state == CK_JOB_RUNNING || st.state == CK_JOB_DONE))
+    // Reference-frame keys: say which pass is running.
+    if (st.state == CK_JOB_RUNNING && st.pass_total > 1 && st.phase != CK_PHASE_JOINING)
     {
-        char tag[32];
-        std::snprintf(tag, sizeof(tag), "[draft %d%%] ", (int)(st.model_scale * 100.0f + 0.5f));
+        char tag[48];
+        std::snprintf(tag, sizeof(tag), "Pass %d/%d (%s) - ", st.pass, st.pass_total,
+                      st.pass_backward ? "backward" : "forward");
         return std::string(tag) + buf;
     }
     return buf;

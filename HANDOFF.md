@@ -19,7 +19,7 @@ Notes for picking this project up in a new session. README.md covers what the ef
 - **PiPL outflags must match GlobalSetup.**
   - out_flags = 33587200 (DEEP_COLOR_AWARE + CUSTOM_UI)
   - out_flags2 = 136320000 (0x8201400: THREADED_RENDERING + I_MIX_GUID_DEPENDENCIES 0x200000 + FLOAT_COLOR_AWARE + SMART_RENDER)
-- **Version:** `MAJOR_VERSION`/`MINOR_VERSION` in CorridorKeyAE.h and `AE_Effect_Version` in the PiPL move together: (MAJOR << 19) + (MINOR << 15). MINOR is only 4 bits, so it goes 0-15, then MAJOR goes up (0.16 overflowed and AE reported a version mismatch). Current: **1.2 = 589824**.
+- **Version:** `MAJOR_VERSION`/`MINOR_VERSION` in CorridorKeyAE.h and `AE_Effect_Version` in the PiPL move together: (MAJOR << 19) + (MINOR << 15). MINOR is only 4 bits, so it goes 0-15, then MAJOR goes up (0.16 overflowed and AE reported a version mismatch). Current: **1.3 = 622592**.
 - **Disk IDs** are append-only. Retired IDs stay listed in the enum and are never reused. Parameter *indices* can be reordered freely.
 - **Popup choices** are stored 1-based, so new choices are appended at the end (e.g. Despill Method "Off" = 4).
 - **`CK_EffectData`** (flattened into the Status arb param) is a fixed POD struct. New fields come out of `reserved[]`; unflatten zero-fills anything an older project doesn't have.
@@ -37,7 +37,7 @@ Notes for picking this project up in a new session. README.md covers what the ef
 | CK_Frames.* | EXR read/write (tinyexr + miniz) with an 8-frame LRU; fg compaction |
 | CK_Hint.* | mask rasterising, hint PNG, layer to hint |
 | CK_Platform.h / _Win.cpp | settings.ini, dialogs, processes, files, TCP |
-| tools/ck_infer_scaled.py + CK_InferScript.h | draft-key wrapper: runs infer.py with a working `--model_scale` (patches `corridorkey.runtime._resize_output_torch`, which raises for scale != 1 in CorridorKey 485f5e9, with a bicubic upscale; uses the original if it works). Written to `%LOCALAPPDATA%` per job. Regenerate the header with `python tools/embed_preview_script.py` |
+| tools/ck_infer_ref.py + CK_RefScript.h | reference-frame keys: builds forward/reversed link folders from `<key>\frames`, runs infer.py on each with the same `--hint_first_frame`, joins the outputs into `<key>\<key name>_fg_exr` / `_alpha_exr`. Prints `CK pass i/N forward|backward` and `CK joining passes` for the Status line. Written to `%LOCALAPPDATA%` per job. Regenerate the header with `python tools/embed_preview_script.py` |
 | tools/CorridorKey_Setup.bat/.ps1 | setup menu (1-8; 7 = manage cached keys, 8 = open settings.ini) |
 
 ### Key mechanics
@@ -66,15 +66,15 @@ Notes for picking this project up in a new session. README.md covers what the ef
   - **If the Choke slider range ever grows, raise `CK_COMPACT_BORDER` to match.** Foreground mode shows the plate where fg was removed.
 - **Built, not yet tested:** sequence key IDs also hash file count + middle + last frame stamps (changes existing sequence key IDs only).
 - **Not chosen:** alpha-only keys (Eric wants CorridorKey's fg edge colour); DWAA (tinyexr can't read it). PNG 16 ruled out (keys are already half-float; PNG clips > 1.0).
-- **Built, not yet tested (v1.2): Key Resolution** (Key Settings: Full / 75 / 50 / 25%). Adds `|ms=` to the key ID when not Full, writes `scale.txt` (Status line shows `[draft N%]`), and launches the wrapper above instead of infer.py. Preview Frame always runs at full resolution. Untested: the wrapper has never run against real CorridorKey here (no GPU); watch log.txt on the first draft key.
+- **Built, not yet tested (v1.3): Matte Layer (current frame)** (Hint Source choice 5). Key Clip takes the frame under the time indicator (`in_data->current_time`) as `req.ref_index` in the keyed range and renders the Matte Layer there. If ref > 0: forces `trimmed` (so the input is always `<key>\\frames`), adds `|ref=N` to the key ID and launches ck_infer_ref.py instead of infer.py. `CK_QueryJob` counts frames in `_ref_out_fwd`/`_ref_out_bwd` while the passes run. Linux tests: the join mapping (ref in the middle, last, first, 1-frame clip) with a stand-in infer.py, and the Status text for a two-pass log. Never run against real CorridorKey.
+- **Removed (v1.3): Key Resolution** (v1.2). `KEY_RES_DISK_ID` stays listed as retired. Eric prefers to precomp and scale. Note for the future: CorridorKey 485f5e9's `--model_scale` != 1 raises in `_resize_output_torch` (the output upscale isn't implemented).
 - **Known gap:** neither loading line has a percentage, because CorridorKey doesn't report any while it loads.
 
 ## Ideas not yet built (roughly in priority order)
 
 1. "Input is Linear" override for EXR plates.
 2. Auto hint with a threshold.
-3. Reference Frame: key both directions from a chosen frame.
-4. The setup menu's cache manager only knows the global cache. It could also scan a chosen project's `CorridorKeys` folder.
+3. The setup menu's cache manager only knows the global cache. It could also scan a chosen project's `CorridorKeys` folder.
 
 Also pending: Eric plans to move Better Feather into the Minion effects category himself, later.
 

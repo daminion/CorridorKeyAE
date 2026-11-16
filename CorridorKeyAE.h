@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 1
-#define MINOR_VERSION 2
+#define MINOR_VERSION 3
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -81,7 +81,6 @@ enum
     CK_KEY_SOURCE,
     CK_KEY_RANGE,
     CK_HANDLES,
-    CK_KEY_RES,             // Key Resolution: draft keys at reduced model scale (v1.2)
     CK_TEMPORAL,
     CK_LOW_VRAM,
     CK_RANGE_END,
@@ -141,17 +140,7 @@ enum
     // v0.15
     COMPACT_KEYS_DISK_ID,
     // v1.2
-    KEY_RES_DISK_ID
-};
-
-// Key Resolution popup (CorridorKey --model_scale)
-enum
-{
-    CK_KR_FULL = 1,
-    CK_KR_75,
-    CK_KR_50,
-    CK_KR_25,
-    CK_KR_NUM = CK_KR_25
+    KEY_RES_DISK_ID                 // retired (v1.3): Key Resolution popup
 };
 
 // Cache Location popup: where Key Clip writes new keys
@@ -198,7 +187,8 @@ enum
     CK_HS_MASK,
     CK_HS_LAYER_FIRST,
     CK_HS_LAYER_EVERY,
-    CK_HS_NUM = CK_HS_LAYER_EVERY
+    CK_HS_LAYER_CURRENT,    // v1.3: hint at the current frame, keyed outward both ways
+    CK_HS_NUM = CK_HS_LAYER_CURRENT
 };
 
 // Temporal Window popup: frames CorridorKey looks at together

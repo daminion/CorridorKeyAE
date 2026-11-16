@@ -1,6 +1,6 @@
 """Regenerates the embedded Python scripts:
   CK_PreviewScript.h  from tools/ck_preview_server.py
-  CK_InferScript.h    from tools/ck_infer_scaled.py
+  CK_RefScript.h      from tools/ck_infer_ref.py
 
 Run after editing either script:  python tools/embed_preview_script.py
 """
@@ -28,4 +28,4 @@ def embed(src_name, dst_name, var):
 
 
 embed("ck_preview_server.py", "CK_PreviewScript.h", "kCK_PreviewScript")
-embed("ck_infer_scaled.py", "CK_InferScript.h", "kCK_InferScript")
+embed("ck_infer_ref.py", "CK_RefScript.h", "kCK_RefScript")

@@ -514,16 +514,6 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER(STR(StrID_Handles_Name), 0, 200, 0, 48, 8, HANDLES_DISK_ID);
 
-    // Draft keys: CorridorKey works on a shrunk copy and its result is scaled
-    // back up, so the key folder is still full resolution.
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_POPUPX(STR(StrID_KeyRes_Name),
-                  CK_KR_NUM,
-                  CK_KR_FULL,
-                  STR(StrID_KeyRes_Choices),
-                  PF_ParamFlag_CANNOT_TIME_VARY,
-                  KEY_RES_DISK_ID);
-
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX(STR(StrID_Temporal_Name),
                   CK_TW_NUM,
@@ -1123,9 +1113,10 @@ static bool BuildHint(PF_InData* in_data, PF_ParamDef* params[],
 // Renders the Matte Layer's alpha (or luminance, if it has no alpha) at the
 // source's frame times. AE hands the layer over in its own pixel space with
 // its effects applied (masks on that layer are not included).
+// first: keyed-range frame index of the (single) hint; ignored for every_frame.
 static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
                                CK_JobRequest& req, bool every_frame,
-                               std::string& error)
+                               std::string& error, int first = 0)
 {
     if (req.width <= 0 || req.height <= 0 || req.fps <= 0)
     {
@@ -1142,7 +1133,8 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
 
     for (int i = 0; i < count; ++i)
     {
-        const A_long t = (A_long)((double)(req.start_frame + i) * in_data->time_scale / req.fps + 0.5);
+        const int index = every_frame ? i : first;
+        const A_long t = (A_long)((double)(req.start_frame + index) * in_data->time_scale / req.fps + 0.5);
 
         PF_ParamDef p;
         AEFX_CLR_STRUCT(p);
@@ -1200,7 +1192,10 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
 
         if (i == 0 && empty)
         {
-            error = "The Matte Layer has no matte at the first keyed frame.\n\n"
+            error = every_frame || first == 0
+                    ? "The Matte Layer has no matte at the first keyed frame.\n\n"
+                    : "The Matte Layer has no matte at the current frame.\n\n";
+            error +=
                     "Pick a layer under Hint > Matte Layer (its alpha, or white = subject),\n"
                     "or change Hint > Hint Source.";
             return false;
@@ -1283,13 +1278,6 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     req.exact_hint = params[CK_EXACT_HINT]->u.bd.value != 0;
     req.low_vram = params[CK_LOW_VRAM]->u.bd.value != 0;
     req.compact = params[CK_COMPACT_KEYS]->u.bd.value != 0;
-    switch (params[CK_KEY_RES]->u.pd.value)
-    {
-        case CK_KR_75: req.model_scale = 0.75f; break;
-        case CK_KR_50: req.model_scale = 0.5f;  break;
-        case CK_KR_25: req.model_scale = 0.25f; break;
-        default:       req.model_scale = 1.0f;  break;
-    }
     switch (params[CK_TEMPORAL]->u.pd.value)
     {
         case CK_TW_80: req.temporal_chunk = 80; break;
@@ -1314,6 +1302,30 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
         case CK_HS_LAYER_EVERY:
             hint_ok = BuildHintFromLayer(in_data, out_data, req, true, error);
             break;
+        case CK_HS_LAYER_CURRENT:
+        {
+            // The frame under the time indicator, as an index into the keyed range.
+            const int src = (int)std::floor((double)in_data->current_time / in_data->time_scale * req.fps + 1e-3);
+            const int ref = src - req.start_frame;
+            if (ref < 0 || ref >= req.frames_total)
+            {
+                error = "The current frame is outside the range being keyed.\n\n"
+                        "Move the time indicator onto the layer (the frame where the\n"
+                        "Matte Layer is good) and click Key Clip again.";
+                hint_ok = false;
+                break;
+            }
+            hint_ok = BuildHintFromLayer(in_data, out_data, req, false, error, ref);
+            if (hint_ok && ref > 0)
+            {
+                // Keyed outward from ref in two passes over a frame folder, so
+                // movies and sequences are always staged into <key>\frames.
+                req.ref_index = ref;
+                if (!req.rendered)
+                    req.trimmed = true;
+            }
+            break;
+        }
         default:
             break;   // Off
     }
