@@ -220,7 +220,7 @@ void CK_OpenSettingsFile(const CK_GlobalSettings& gs)
 void CK_ShowMessage(const char* title_utf8, const std::string& body_utf8)
 {
     MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
-                Widen(title_utf8 ? title_utf8 : "CorridorKey AE").c_str(),
+                Widen(title_utf8 ? title_utf8 : "CorridorKey_MinionsTake").c_str(),
                 MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
 }
 
@@ -381,7 +381,7 @@ unsigned long CK_TickMs()
 bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8)
 {
     return MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
-                       Widen(title_utf8 ? title_utf8 : "CorridorKey AE").c_str(),
+                       Widen(title_utf8 ? title_utf8 : "CorridorKey_MinionsTake").c_str(),
                        MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
 }
 

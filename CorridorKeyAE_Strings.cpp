@@ -7,7 +7,7 @@ typedef struct {
 
 TableString g_strs[StrID_NUMTYPES] = {
     StrID_NONE,                  "",
-    StrID_Name,                  "CorridorKey AE",
+    StrID_Name,                  "CorridorKey_MinionsTake",
     StrID_Description,           "After Effects wrapper for CorridorKey 2.0 by Corridor Digital.\rPersonal build, Minion LLC 2026",
     StrID_KeyClip_Name,          "Key Clip",
     StrID_KeyClip_Button,        "Key Clip",
@@ -16,7 +16,14 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_WorkingSpace_Name,     "Working Space",
     StrID_WorkingSpace_Choices,  "sRGB (not linearized)|Linear",
     StrID_Despill_Name,          "Despill",
+    StrID_ScreenColour_Name,     "Screen Colour",
+    StrID_ScreenColour_Choices,  "Green|Blue|Picked",
+    StrID_PickedColour_Name,     "Picked Colour",
+    StrID_DespillMethod_Name,    "Despill Method",
+    StrID_DespillMethod_Choices, "Average|Gentle (keeps yellows)|Strong",
     StrID_MatteChoke_Name,       "Matte Choke",
+    StrID_Despeckle_Name,        "Despeckle Size (px)",
+    StrID_KeepOriginal_Name,     "Keep Original in Solid Areas",
     StrID_MatteGamma_Name,       "Matte Gamma",
     StrID_HintMask_Name,         "Hint Mask",
     StrID_HintQuality_Name,      "Hint Strength",

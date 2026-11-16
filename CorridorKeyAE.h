@@ -17,11 +17,13 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 9
+#define MINOR_VERSION 10
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
 
+// Internal ID AE uses to find the effect in saved projects. Never change it,
+// even though the display name is now CorridorKey_MinionsTake.
 #define CK_MATCH_NAME "Minion CorridorKeyAE"
 #define CK_PATH_MAX 1024
 #define CK_ARB_VERSION 2
@@ -52,8 +54,13 @@ enum
     CK_OUTPUT_MODE,
     CK_WORKING_SPACE,
     CK_DESPILL,
+    CK_SCREEN_COLOUR,
+    CK_PICKED_COLOUR,
+    CK_DESPILL_METHOD,
     CK_MATTE_CHOKE,
     CK_MATTE_GAMMA,
+    CK_DESPECKLE,
+    CK_KEEP_ORIGINAL,
     // Hint group
     CK_HINT_START,
     CK_HINT_SOURCE,
@@ -111,7 +118,31 @@ enum
     HINT_SOURCE_DISK_ID,
     CARRY_QUALITY_DISK_ID,
     TEMPORAL_DISK_ID,
-    EXACT_HINT_DISK_ID
+    EXACT_HINT_DISK_ID,
+    // v0.10
+    SCREEN_COLOUR_DISK_ID,
+    PICKED_COLOUR_DISK_ID,
+    DESPILL_METHOD_DISK_ID,
+    DESPECKLE_DISK_ID,
+    KEEP_ORIGINAL_DISK_ID
+};
+
+// Screen Colour popup
+enum
+{
+    CK_SC_GREEN = 1,
+    CK_SC_BLUE,
+    CK_SC_PICKED,
+    CK_SC_NUM = CK_SC_PICKED
+};
+
+// Despill Method popup
+enum
+{
+    CK_DM_AVERAGE = 1,
+    CK_DM_GENTLE,
+    CK_DM_STRONG,
+    CK_DM_NUM = CK_DM_STRONG
 };
 
 // Hint Source popup

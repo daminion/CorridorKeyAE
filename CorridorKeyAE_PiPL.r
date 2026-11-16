@@ -12,11 +12,11 @@ resource 'PiPL' (16000) {
 		},
 		/* [2] */
 		Name {
-			"CorridorKey AE"
+			"CorridorKey_MinionsTake"
 		},
 		/* [3] */
 		Category {
-			"Keying"
+			"Minion"
 		},
 #ifdef AE_OS_WIN
     #if defined(AE_PROC_INTELx64)
@@ -40,7 +40,7 @@ resource 'PiPL' (16000) {
 		},
 		/* [8] */
 		AE_Effect_Version {
-			294912	/* 0.9 */
+			327680	/* 0.10 */
 		},
 		/* [9] */
 		AE_Effect_Info_Flags {

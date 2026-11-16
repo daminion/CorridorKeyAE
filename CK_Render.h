@@ -14,10 +14,30 @@ enum CK_OutputMode
     CK_MODE_ORIGINAL        // caller passes the input through
 };
 
+enum CK_ScreenColour
+{
+    CK_SCREEN_GREEN = 0,
+    CK_SCREEN_BLUE,
+    CK_SCREEN_PICKED
+};
+
+enum CK_DespillMethod
+{
+    CK_DESPILL_AVERAGE = 0,    // key channel limited to the average of the other two (CorridorKey's)
+    CK_DESPILL_GENTLE,         // limited to the larger of the other two: keeps yellows/cyans
+    CK_DESPILL_STRONG          // limited to the smaller of the other two: removes the most
+};
+
 struct CK_RenderSettings
 {
     int   mode = CK_MODE_CUTOUT;
     float despill = 0.5f;      // 0..1
+    int   screen = CK_SCREEN_GREEN;
+    float picked[3] = { 0.0f, 1.0f, 0.0f };   // linear RGB, for CK_SCREEN_PICKED
+    int   method = CK_DESPILL_AVERAGE;        // Green/Blue only; Picked always averages
+    int   despeckle_px = 0;    // remove matte islands smaller than this many full-res pixels
+    bool  keep_original = false;   // plate colour where the matte is solid
+    const float* plate = nullptr;  // linear RGB, width*height*3 in OUTPUT pixels (for keep_original)
     float choke_px = 0.0f;     // full-res pixels; + shrinks, - grows
     float gamma = 1.0f;        // matte gamma; > 1 makes soft edges more opaque
     bool  srgb_out = true;     // encode linear results to sRGB for a non-linear project
@@ -41,3 +61,4 @@ void CK_ProcessMatte(const CK_Frame& frame, const CK_RenderSettings& s,
                      std::vector<float>& matte);
 
 float CK_LinearToSRGB(float v);
+float CK_SRGBToLinear(float v);

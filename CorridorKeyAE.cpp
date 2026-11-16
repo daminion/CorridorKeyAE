@@ -340,6 +340,25 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                          DESPILL_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_ScreenColour_Name),
+                  CK_SC_NUM,
+                  CK_SC_GREEN,
+                  STR(StrID_ScreenColour_Choices),
+                  0,
+                  SCREEN_COLOUR_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_COLOR(STR(StrID_PickedColour_Name), 40, 170, 70, PICKED_COLOUR_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_DespillMethod_Name),
+                  CK_DM_NUM,
+                  CK_DM_AVERAGE,
+                  STR(StrID_DespillMethod_Choices),
+                  0,
+                  DESPILL_METHOD_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX(STR(StrID_MatteChoke_Name),
                          -20, 20, -5, 5, 0,
                          PF_Precision_TENTHS,
@@ -354,6 +373,12 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
                          0,
                          0,
                          MATTE_GAMMA_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER(STR(StrID_Despeckle_Name), 0, 20000, 0, 500, 0, DESPECKLE_DISK_ID);
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX(STR(StrID_KeepOriginal_Name), FALSE, 0, KEEP_ORIGINAL_DISK_ID);
 
     // --- Hint: tells CorridorKey which subject to keep (read at Key Clip) ---
     AEFX_CLR_STRUCT(def);
@@ -379,7 +404,7 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX(STR(StrID_HintQuality_Name),
-                         0, 100, 0, 100, 95,
+                         0, 100, 0, 100, 75,
                          PF_Precision_INTEGER,
                          PF_ValueDisplayFlag_PERCENT,
                          PF_ParamFlag_CANNOT_TIME_VARY,
@@ -875,7 +900,7 @@ static bool BuildHintFromLayer(PF_InData* in_data, PF_OutData* out_data,
 static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[])
 {
     PF_Err err = PF_Err_NONE;
-    const char* title = "CorridorKey AE";
+    const char* title = "CorridorKey_MinionsTake";
 
     CK_EffectData data;
     CK_ReadEffectData(in_data, params, &data);
@@ -1028,7 +1053,7 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
                 SetPathField(data.cache_override, chosen);
                 err = CK_WriteEffectData(in_data, params, data);
                 if (!err)
-                    CK_ShowMessage("CorridorKey AE",
+                    CK_ShowMessage("CorridorKey_MinionsTake",
                                    "This effect will cache new keys to:\n  " + chosen);
             }
             break;
@@ -1043,7 +1068,7 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
             if (!err)
             {
                 CK_GlobalSettings gs = CK_LoadGlobalSettings();
-                CK_ShowMessage("CorridorKey AE",
+                CK_ShowMessage("CorridorKey_MinionsTake",
                                "This effect now caches new keys to the default folder:\n  " +
                                CK_ResolveCacheRoot("", gs));
             }
@@ -1209,6 +1234,49 @@ static void WriteToWorld(const std::vector<float>& buf, PF_EffectWorld* w,
     }
 }
 
+// AE world (same bit depth as the output) -> linear, unpremultiplied RGB floats.
+static void ReadWorldLinear(const PF_EffectWorld* w, PF_PixelFormat fmt, bool srgb,
+                            std::vector<float>& out)
+{
+    out.resize((size_t)w->width * w->height * 3);
+    for (A_long y = 0; y < w->height; ++y)
+    {
+        const char* row = reinterpret_cast<const char*>(w->data) + (size_t)y * w->rowbytes;
+        for (A_long x = 0; x < w->width; ++x)
+        {
+            float a, r, g, b;
+            switch (fmt)
+            {
+                case PF_PixelFormat_ARGB128:
+                {
+                    const PF_PixelFloat* p = reinterpret_cast<const PF_PixelFloat*>(row) + x;
+                    a = p->alpha; r = p->red; g = p->green; b = p->blue;
+                    break;
+                }
+                case PF_PixelFormat_ARGB64:
+                {
+                    const PF_Pixel16* p = reinterpret_cast<const PF_Pixel16*>(row) + x;
+                    const float k = 1.0f / PF_MAX_CHAN16;
+                    a = p->alpha * k; r = p->red * k; g = p->green * k; b = p->blue * k;
+                    break;
+                }
+                default:
+                {
+                    const PF_Pixel8* p = reinterpret_cast<const PF_Pixel8*>(row) + x;
+                    const float k = 1.0f / PF_MAX_CHAN8;
+                    a = p->alpha * k; r = p->red * k; g = p->green * k; b = p->blue * k;
+                    break;
+                }
+            }
+            if (a > 1e-4f && a < 0.9999f) { r /= a; g /= a; b /= a; }
+            float* o = &out[((size_t)y * w->width + x) * 3];
+            o[0] = srgb ? CK_SRGBToLinear(r) : r;
+            o[1] = srgb ? CK_SRGBToLinear(g) : g;
+            o[2] = srgb ? CK_SRGBToLinear(b) : b;
+        }
+    }
+}
+
 static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
                           PF_SmartRenderExtra* extra)
 {
@@ -1222,6 +1290,12 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
     ERR(extra->cb->checkout_output(in_data->effect_ref, &outW));
 
     PF_ParamDef p_mode, p_space, p_despill, p_choke, p_gamma, p_status;
+    PF_ParamDef p_screen, p_picked, p_method, p_speck, p_keep;
+    AEFX_CLR_STRUCT(p_screen);
+    AEFX_CLR_STRUCT(p_picked);
+    AEFX_CLR_STRUCT(p_method);
+    AEFX_CLR_STRUCT(p_speck);
+    AEFX_CLR_STRUCT(p_keep);
     AEFX_CLR_STRUCT(p_mode);
     AEFX_CLR_STRUCT(p_space);
     AEFX_CLR_STRUCT(p_despill);
@@ -1236,6 +1310,11 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
     ERR(PF_CHECKOUT_PARAM(in_data, CK_MATTE_CHOKE, t, ts, sc, &p_choke));
     ERR(PF_CHECKOUT_PARAM(in_data, CK_MATTE_GAMMA, t, ts, sc, &p_gamma));
     ERR(PF_CHECKOUT_PARAM(in_data, CK_STATUS, t, ts, sc, &p_status));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_SCREEN_COLOUR, t, ts, sc, &p_screen));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_PICKED_COLOUR, t, ts, sc, &p_picked));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_DESPILL_METHOD, t, ts, sc, &p_method));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_DESPECKLE, t, ts, sc, &p_speck));
+    ERR(PF_CHECKOUT_PARAM(in_data, CK_KEEP_ORIGINAL, t, ts, sc, &p_keep));
 
     bool drew = false;
 
@@ -1257,6 +1336,26 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
                 s.despill = (float)(p_despill.u.fs_d.value / 100.0);
                 s.choke_px = (float)p_choke.u.fs_d.value;
                 s.gamma = (float)p_gamma.u.fs_d.value;
+                s.despeckle_px = (int)p_speck.u.sd.value;
+                s.keep_original = p_keep.u.bd.value != 0;
+
+                switch (p_screen.u.pd.value)
+                {
+                    case CK_SC_BLUE:   s.screen = CK_SCREEN_BLUE;   break;
+                    case CK_SC_PICKED: s.screen = CK_SCREEN_PICKED; break;
+                    default:           s.screen = CK_SCREEN_GREEN;  break;
+                }
+                switch (p_method.u.pd.value)
+                {
+                    case CK_DM_GENTLE: s.method = CK_DESPILL_GENTLE; break;
+                    case CK_DM_STRONG: s.method = CK_DESPILL_STRONG; break;
+                    default:           s.method = CK_DESPILL_AVERAGE; break;
+                }
+                // The colour control is in the project's space; despill works in linear.
+                const PF_Pixel& pc = p_picked.u.cd.value;
+                const float pick[3] = { pc.red / 255.0f, pc.green / 255.0f, pc.blue / 255.0f };
+                for (int c = 0; c < 3; ++c)
+                    s.picked[c] = s.srgb_out ? CK_SRGBToLinear(pick[c]) : pick[c];
 
                 const CK_PreRenderData* prd =
                     reinterpret_cast<const CK_PreRenderData*>(extra->input->pre_render_data);
@@ -1269,15 +1368,27 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
                                 ? (float)in_data->downsample_y.den / (float)in_data->downsample_y.num
                                 : 1.0f;
 
-                std::vector<float> buf((size_t)outW->width * outW->height * 4);
-                CK_RenderKey(*frame, s, outW->width, outW->height, buf.data());
-
                 PF_PixelFormat fmt = PF_PixelFormat_ARGB32;
                 AEFX_SuiteScoper<PF_WorldSuite2> world_suite(in_data,
                                                              kPFWorldSuite,
                                                              kPFWorldSuiteVersion2,
                                                              out_data);
                 ERR(world_suite->PF_GetPixelFormat(outW, &fmt));
+
+                // Keep Original needs the plate in linear RGB, pixel-aligned with
+                // the output (same result rect, so same size).
+                std::vector<float> plate;
+                if (!err && s.keep_original &&
+                    inW->width == outW->width && inW->height == outW->height)
+                {
+                    ReadWorldLinear(inW, fmt, s.srgb_out, plate);
+                    s.plate = plate.data();
+                }
+
+                std::vector<float> buf((size_t)outW->width * outW->height * 4);
+                if (!err)
+                    CK_RenderKey(*frame, s, outW->width, outW->height, buf.data());
+
                 if (!err)
                 {
                     WriteToWorld(buf, outW, fmt);
@@ -1291,6 +1402,11 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
     if (!err && !drew && inW && outW)
         ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, inW, outW, NULL, NULL));
 
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_keep));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_speck));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_method));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_picked));
+    ERR2(PF_CHECKIN_PARAM(in_data, &p_screen));
     ERR2(PF_CHECKIN_PARAM(in_data, &p_status));
     ERR2(PF_CHECKIN_PARAM(in_data, &p_gamma));
     ERR2(PF_CHECKIN_PARAM(in_data, &p_choke));
@@ -1317,9 +1433,9 @@ PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
 
     result = PF_REGISTER_EFFECT_EXT2(inPtr,
                                      inPluginDataCallBackPtr,
-                                     "CorridorKey AE",
+                                     "CorridorKey_MinionsTake",
                                      CK_MATCH_NAME,
-                                     "Keying",
+                                     "Minion",
                                      AE_RESERVED_INFO,
                                      "EffectMain",
                                      "https://corridorkey.com");
