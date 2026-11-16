@@ -1740,6 +1740,7 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
         CK_PreviewKey(in_dir, dir, !srgb, error);
 
     frame = ok ? CK_GetKeyedFrame(dir, 0, 0) : nullptr;
+    CK_RemoveTree(in_dir);   // the input frame isn't needed once keyed
     CK_PreviewNote(owner, data.preview_token, frame ? CK_PR_DONE : CK_PR_FAILED);
     CK_PreviewEndDir(dir);
     return frame;

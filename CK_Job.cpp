@@ -365,6 +365,8 @@ bool CK_StartJob(const std::string& job_dir,
     cmd += " || (type nul > " + Quote(job_dir + "\\failed.flag") + ")";
     if (req.trimmed || req.rendered)
         cmd += " & rmdir /s /q " + Quote(trim_dir) + " 2>nul";   // drop the temporary frames
+    if (req.temporal_chunk > 0 && req.low_vram)
+        cmd += " & rmdir /s /q " + Quote(job_dir + "\\tmp") + " 2>nul";   // low-VRAM scratch
 
     unsigned long pid = 0;
     if (!CK_LaunchHidden(cmd, corridorkey_dir, &pid))
