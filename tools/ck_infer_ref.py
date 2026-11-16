@@ -106,10 +106,14 @@ def main():
             return 1
 
     # Join: <key>\<key name>_fg_exr\fg_000000.exr ..., as a normal key.
+    # Built under temporary names and renamed at the end (alpha first, then
+    # fg), so the plug-in never sees a half-joined key.
     log("CK joining passes")
     base = os.path.basename(key)
+    staged = {}
     for kind in ("fg", "alpha"):
-        final = os.path.join(key, "%s_%s_exr" % (base, kind))
+        final = os.path.join(key, "_joining_%s" % kind)
+        staged[kind] = final
         shutil.rmtree(final, ignore_errors=True)
         os.makedirs(final)
         for _, _, d_out, index_of in passes:
@@ -120,6 +124,11 @@ def main():
                 dst = os.path.join(final, "%s_%06d.exr" % (kind, index_of(i)))
                 if not os.path.exists(dst):   # the reference frame: forward's copy wins
                     os.replace(src, dst)
+
+    for kind in ("alpha", "fg"):
+        final = os.path.join(key, "%s_%s_exr" % (base, kind))
+        shutil.rmtree(final, ignore_errors=True)
+        os.replace(staged[kind], final)
 
     for path in work.values():
         shutil.rmtree(path, ignore_errors=True)

@@ -555,6 +555,9 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
             {
                 st.elapsed_s = CK_FileAgeSeconds(job_dir + "\\pid.txt");
                 CK_ParseJobLog(CK_ReadFileTail(CK_JobLogPath(job_dir), 16384), st);
+                // Two-pass keys: nothing is final until the passes are joined.
+                if (st.pass_total > 0 || st.phase == CK_PHASE_JOINING)
+                    st.in_passes = true;
             }
         }
     }
