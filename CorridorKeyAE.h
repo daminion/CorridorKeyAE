@@ -16,8 +16,8 @@
 #include "String_Utils.h"
 #include "CorridorKeyAE_Strings.h"
 
-#define MAJOR_VERSION 0
-#define MINOR_VERSION 16
+#define MAJOR_VERSION 1
+#define MINOR_VERSION 0
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0

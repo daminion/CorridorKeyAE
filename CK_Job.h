@@ -14,7 +14,7 @@
 //   frames\ ...   trimmed source frames (removed when the key finishes)
 //   compact.flag   Compact Keys was on: compact the fg once the key is done
 //   compact2.txt   next fg frame to compact (resume point)
-//   compact2.done  every fg frame has been compacted (edges-only fg, v0.16).
+//   compact2.done  every fg frame has been compacted (edges-only fg, v1.0).
 //                  v0.15's compact.txt/.done are ignored, so those keys are
 //                  compacted again the new way.
 
