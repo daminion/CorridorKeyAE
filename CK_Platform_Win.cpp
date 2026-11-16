@@ -268,6 +268,48 @@ std::string CK_ReadTextFile(const std::string& path_utf8)
     return out;
 }
 
+std::string CK_ReadFileTail(const std::string& path_utf8, unsigned long max_bytes)
+{
+    std::string out;
+    HANDLE h = CreateFileW(Widen(path_utf8).c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    LARGE_INTEGER size;
+    if (GetFileSizeEx(h, &size) && size.QuadPart > 0)
+    {
+        const long long want = size.QuadPart < (long long)max_bytes ? size.QuadPart : (long long)max_bytes;
+        LARGE_INTEGER pos;
+        pos.QuadPart = size.QuadPart - want;
+        if (SetFilePointerEx(h, pos, NULL, FILE_BEGIN))
+        {
+            out.resize((size_t)want);
+            DWORD got = 0;
+            if (ReadFile(h, &out[0], (DWORD)want, &got, NULL))
+                out.resize(got);
+            else
+                out.clear();
+        }
+    }
+    CloseHandle(h);
+    return out;
+}
+
+long CK_FileAgeSeconds(const std::string& path_utf8)
+{
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExW(Widen(path_utf8).c_str(), GetFileExInfoStandard, &fa))
+        return -1;
+    FILETIME now_ft;
+    GetSystemTimeAsFileTime(&now_ft);
+    const unsigned long long now = ((unsigned long long)now_ft.dwHighDateTime << 32) | now_ft.dwLowDateTime;
+    // Last-write, not creation: Windows can reuse the creation time of a
+    // file deleted and recreated under the same name.
+    const unsigned long long made = ((unsigned long long)fa.ftLastWriteTime.dwHighDateTime << 32) |
+                                    fa.ftLastWriteTime.dwLowDateTime;
+    return now > made ? (long)((now - made) / 10000000ULL) : 0;
+}
+
 std::string CK_FileStamp(const std::string& path_utf8)
 {
     WIN32_FILE_ATTRIBUTE_DATA fa;
@@ -386,6 +428,21 @@ bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8)
     return MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
                        Widen(title_utf8 ? title_utf8 : "CorridorKey_MinionsTake").c_str(),
                        MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
+}
+
+int CK_AskYesNoCancel(const char* title_utf8, const std::string& body_utf8)
+{
+    const int r = MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
+                              Widen(title_utf8 ? title_utf8 : "CorridorKey_MinionsTake").c_str(),
+                              MB_YESNOCANCEL | MB_ICONQUESTION | MB_TASKMODAL);
+    return r == IDYES ? 1 : r == IDNO ? 0 : -1;
+}
+
+bool CK_SetDefaultCacheRoot(const std::string& folder_utf8)
+{
+    const CK_GlobalSettings gs = CK_LoadGlobalSettings();   // creates the file if needed
+    return WritePrivateProfileStringW(L"paths", L"cache_root", Widen(folder_utf8).c_str(),
+                                      Widen(gs.settings_file).c_str()) != 0;
 }
 
 void CK_OpenInEditor(const std::string& file_utf8)

@@ -52,10 +52,25 @@ enum CK_JobState
     CK_JOB_OFFLINE         // job folder unreachable (drive disconnected)
 };
 
+// What a running job is doing, from the tail of its log.txt
+enum CK_JobPhase
+{
+    CK_PHASE_STARTING = 0,  // nothing recognisable yet (python starting, trimming)
+    CK_PHASE_LOADING,       // loading model weights
+    CK_PHASE_PREPASS_MOTION,// RVM continuous prepass
+    CK_PHASE_PREPASS_SCENE, // frozen VFM prepass
+    CK_PHASE_WINDOWS        // main pass, window by window
+};
+
 struct CK_JobStatus
 {
     CK_JobState state = CK_JOB_NONE;
     int frames_done = 0;
+    // Running jobs only:
+    CK_JobPhase phase = CK_PHASE_STARTING;
+    int windows_done = 0;
+    int windows_total = 0;
+    long elapsed_s = -1;    // since the job started (-1 = unknown)
 };
 
 // <cache_root>\<clip>_<8 hex>. Hash covers the source file identity and the
@@ -86,6 +101,9 @@ void CK_TrackJob(const std::string& job_dir);
 // since the last poll (time to refresh the panels). Finished jobs drop off
 // after their final change has been reported.
 bool CK_PollTrackedJobs();
+
+// Fills phase / windows from log text (exposed for testing).
+void CK_ParseJobLog(const std::string& log, CK_JobStatus& st);
 
 // One-line text for the Status control.
 std::string CK_StatusText(const CK_JobStatus& st, int frames_total);

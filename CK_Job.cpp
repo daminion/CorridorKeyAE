@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <vector>
 #include <mutex>
@@ -77,7 +78,8 @@ namespace
     std::string Signature(const CK_JobStatus& st)
     {
         char buf[48];
-        std::snprintf(buf, sizeof(buf), "%d:%d", (int)st.state, st.frames_done);
+        std::snprintf(buf, sizeof(buf), "%d:%d:%d:%d:%ld", (int)st.state, st.frames_done,
+                      (int)st.phase, st.windows_done, st.elapsed_s);
         return buf;
     }
 }
@@ -393,6 +395,50 @@ void CK_CancelJob(const std::string& job_dir)
     g_cache.erase(job_dir);
 }
 
+// Reads CorridorKey's progress lines (runtime.py) from the end of its log:
+//   "Loading CorridorKey v2 runtime weights: ..."
+//   "    RVM continuous prepass: T=..."
+//   "    frozen VFM prepass: T=..."
+//   "    Hann stage1: chunk=.., stride=.., windows=N, ..."
+//   "      window i/N [t0:t1]"
+// The latest recognised line wins. Unknown output leaves the phase alone.
+void CK_ParseJobLog(const std::string& log, CK_JobStatus& st)
+{
+    size_t pos = 0;
+    while (pos < log.size())
+    {
+        size_t end = log.find_first_of("\r\n", pos);
+        if (end == std::string::npos) end = log.size();
+        const std::string line = log.substr(pos, end - pos);
+        pos = end + 1;
+
+        int a = 0, b = 0;
+        const size_t lead = line.find_first_not_of(' ');
+        if (lead == std::string::npos) continue;
+        const char* l = line.c_str() + lead;
+
+        if (std::strncmp(l, "window ", 7) == 0 && std::sscanf(l + 7, "%d/%d", &a, &b) == 2 && b > 0)
+        {
+            st.phase = CK_PHASE_WINDOWS;
+            st.windows_done = a;
+            st.windows_total = b;
+        }
+        else if (std::strncmp(l, "Hann stage1:", 12) == 0)
+        {
+            st.phase = CK_PHASE_WINDOWS;
+            st.windows_done = 0;
+            const char* w = std::strstr(l, "windows=");
+            st.windows_total = (w && std::sscanf(w + 8, "%d", &b) == 1) ? b : 0;
+        }
+        else if (std::strncmp(l, "frozen VFM prepass", 18) == 0)
+            st.phase = CK_PHASE_PREPASS_SCENE;
+        else if (std::strncmp(l, "RVM continuous prepass", 22) == 0)
+            st.phase = CK_PHASE_PREPASS_MOTION;
+        else if (std::strncmp(l, "Loading CorridorKey", 19) == 0)
+            st.phase = CK_PHASE_LOADING;
+    }
+}
+
 CK_JobStatus CK_QueryJob(const std::string& job_dir)
 {
     CK_JobStatus st;
@@ -426,6 +472,11 @@ CK_JobStatus CK_QueryJob(const std::string& job_dir)
             unsigned long pid = std::strtoul(
                 CK_ReadTextFile(job_dir + "\\pid.txt").c_str(), NULL, 10);
             st.state = CK_ProcessAlive(pid) ? CK_JOB_RUNNING : CK_JOB_INTERRUPTED;
+            if (st.state == CK_JOB_RUNNING)
+            {
+                st.elapsed_s = CK_FileAgeSeconds(job_dir + "\\pid.txt");
+                CK_ParseJobLog(CK_ReadFileTail(CK_JobLogPath(job_dir), 16384), st);
+            }
         }
     }
 
@@ -442,15 +493,40 @@ std::string CK_StatusText(const CK_JobStatus& st, int frames_total)
     switch (st.state)
     {
         case CK_JOB_RUNNING:
+        {
+            char t[32] = "";
+            if (st.elapsed_s >= 0)
+                std::snprintf(t, sizeof(t), "  %ld:%02ld", st.elapsed_s / 60, st.elapsed_s % 60);
+
             if (st.frames_done <= 0)
-                std::snprintf(buf, sizeof(buf), "Keying... analysing clip");
+            {
+                switch (st.phase)
+                {
+                    case CK_PHASE_LOADING:
+                        std::snprintf(buf, sizeof(buf), "Keying... loading model%s", t); break;
+                    case CK_PHASE_PREPASS_MOTION:
+                        std::snprintf(buf, sizeof(buf), "Keying... analysing motion%s", t); break;
+                    case CK_PHASE_PREPASS_SCENE:
+                        std::snprintf(buf, sizeof(buf), "Keying... analysing scene%s", t); break;
+                    case CK_PHASE_WINDOWS:
+                        if (st.windows_total > 0)
+                            std::snprintf(buf, sizeof(buf), "Keying... analysing clip, window %d / %d%s",
+                                          st.windows_done, st.windows_total, t);
+                        else
+                            std::snprintf(buf, sizeof(buf), "Keying... analysing clip%s", t);
+                        break;
+                    default:
+                        std::snprintf(buf, sizeof(buf), "Keying... starting%s", t); break;
+                }
+            }
             else if (frames_total > 0)
-                std::snprintf(buf, sizeof(buf), "Keying... %d / %d frames (%d%%)",
+                std::snprintf(buf, sizeof(buf), "Keying... %d / %d frames (%d%%)%s",
                               st.frames_done, frames_total,
-                              (int)(100.0 * st.frames_done / frames_total));
+                              (int)(100.0 * st.frames_done / frames_total), t);
             else
-                std::snprintf(buf, sizeof(buf), "Keying... %d frames", st.frames_done);
+                std::snprintf(buf, sizeof(buf), "Keying... %d frames%s", st.frames_done, t);
             break;
+        }
         case CK_JOB_DONE:
             std::snprintf(buf, sizeof(buf), "Keyed - %d frames cached", st.frames_done);
             break;

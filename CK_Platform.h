@@ -20,6 +20,9 @@ struct CK_GlobalSettings
 // the first time.
 CK_GlobalSettings CK_LoadGlobalSettings();
 
+// Writes cache_root in settings.ini (the default for every effect).
+bool CK_SetDefaultCacheRoot(const std::string& folder_utf8);
+
 // Fallback when settings.ini has no cache_root: %LOCALAPPDATA%\CorridorKeyAE\Cache
 std::string CK_DefaultCacheRoot();
 
@@ -46,6 +49,10 @@ bool CK_MakeDirs(const std::string& path_utf8);
 bool CK_RemoveFile(const std::string& path_utf8);
 bool CK_WriteTextFile(const std::string& path_utf8, const std::string& text);
 std::string CK_ReadTextFile(const std::string& path_utf8);   // small files only
+// Last max_bytes of a file (e.g. a growing log), "" if missing.
+std::string CK_ReadFileTail(const std::string& path_utf8, unsigned long max_bytes);
+// Seconds since the file was last written, or -1 if missing.
+long CK_FileAgeSeconds(const std::string& path_utf8);
 
 // "<size>-<mtime>" for change detection; empty if the file is missing.
 std::string CK_FileStamp(const std::string& path_utf8);
@@ -65,6 +72,8 @@ int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix);
 
 unsigned long CK_TickMs();
 bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8);
+// 1 = Yes, 0 = No, -1 = Cancel
+int CK_AskYesNoCancel(const char* title_utf8, const std::string& body_utf8);
 void CK_OpenInEditor(const std::string& file_utf8);
 void CK_OpenFolder(const std::string& dir_utf8);
 

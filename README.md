@@ -23,6 +23,12 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
   - **Preview Frame** button: keys just the current frame. The first click starts a preview helper (`tools/ck_preview_server.py`, embedded in the plug-in as `CK_PreviewScript.h`; regenerate with `python tools/embed_preview_script.py`) that keeps the model in GPU memory, so later clicks take seconds. It keys exactly the pixels the effect receives (previous effects included) at the current preview resolution, without hints or time awareness. Results are cached in `<cache>\_preview\<pixel hash>`, so revisiting a previewed frame is instant. The helper stops on Key Clip (frees VRAM) or after 10 idle minutes.
   - **Key Source** (Key Settings): Auto / Source File / Rendered Layer. Auto keys the footage file, or renders the layer when there's no file (precomps). Rendered Layer renders the layer's input for the key range to EXRs in the cache and keys those, so a LUT inside a precomp is keyed as seen. Effects above this one on the same layer may not be included (AE limitation), so put the conversion inside the precomp. The Composition panel must be at Full resolution. Rendered keys are identified by their pixels, so an unchanged render reuses its key.
   - Setup menu option 7: P clears Preview Frame results.
+- **v0.13 (testing):**
+  - Status line follows CorridorKey's log while it analyses: starting / loading model / analysing motion / analysing scene / analysing clip, window i / N, then frames, with elapsed time.
+  - Rendered Key Source shows AE's progress bar with Cancel while it renders the layer's frames.
+  - Despill Method: Off (appended, so saved choices don't shift).
+  - Keep Original in Solid Areas is on for new effects.
+  - Cache group: This Effect's Folder [Choose...] / [Use Default], and Default for All Effects [Set...] (choose the global cache folder, or open settings.ini).
 
 Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it. Option 7 manages cached keys: lists each key's clip, frames, size, date and state, and deletes picked keys, keys whose source is missing, or keys older than N days (running keys are never deleted).
 

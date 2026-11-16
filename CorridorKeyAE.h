@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 12
+#define MINOR_VERSION 13
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -161,7 +161,8 @@ enum
     CK_DM_AVERAGE = 1,
     CK_DM_GENTLE,
     CK_DM_STRONG,
-    CK_DM_NUM = CK_DM_STRONG
+    CK_DM_OFF,              // v0.13, appended so saved values don't shift
+    CK_DM_NUM = CK_DM_OFF
 };
 
 // Hint Source popup

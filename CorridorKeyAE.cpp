@@ -394,7 +394,9 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     PF_ADD_SLIDER(STR(StrID_Despeckle_Name), 0, 20000, 0, 500, 0, DESPECKLE_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
-    PF_ADD_CHECKBOXX(STR(StrID_KeepOriginal_Name), FALSE, 0, KEEP_ORIGINAL_DISK_ID);
+    // On for new effects (v0.13): keeps the plate's own grain and detail where the
+    // subject is solid. Saved projects keep whatever they had.
+    PF_ADD_CHECKBOXX(STR(StrID_KeepOriginal_Name), TRUE, 0, KEEP_ORIGINAL_DISK_ID);
 
     // --- Hint: tells CorridorKey which subject to keep (read at Key Clip) ---
     AEFX_CLR_STRUCT(def);
@@ -804,6 +806,55 @@ static bool GetLayerSource(PF_InData* in_data, A_long key_source,
 // req's range into staging_dir as EXRs, and fingerprints the pixels so an
 // unchanged render reuses its key. Precomp contents are always included;
 // effects above this one on the same layer may not be (an AE limitation).
+static const char* kCK_Cancelled = "(cancelled)";
+
+// AE's own progress bar with a Cancel button (PFAppSuite6). AE only shows it
+// once the work has run for a moment. Missing suite = no bar, no harm.
+class CK_ProgressDialog
+{
+public:
+    CK_ProgressDialog(PF_InData* in_data, const char* title)
+        : m_basic(in_data->pica_basicP)
+    {
+        if (m_basic && m_basic->AcquireSuite(kPFAppSuite, kPFAppSuiteVersion6,
+                                             (const void**)&m_suite) != 0)
+            m_suite = NULL;
+        if (m_suite)
+        {
+            A_UTF16Char t[128], c[16];
+            ToUTF16Z(title, t, 128);
+            ToUTF16Z("Cancel", c, 16);
+            if (m_suite->PF_CreateNewAppProgressDialog(t, c, FALSE, &m_dlg) != PF_Err_NONE)
+                m_dlg = NULL;
+        }
+    }
+    ~CK_ProgressDialog()
+    {
+        if (m_suite && m_dlg)
+            m_suite->PF_DisposeAppProgressDialog(m_dlg);
+        if (m_suite)
+            m_basic->ReleaseSuite(kPFAppSuite, kPFAppSuiteVersion6);
+    }
+    // False when the user pressed Cancel.
+    bool Update(A_long done, A_long total)
+    {
+        return !(m_suite && m_dlg) ||
+               m_suite->PF_AppProgressDialogUpdate(m_dlg, done, total) == PF_Err_NONE;
+    }
+
+private:
+    static void ToUTF16Z(const char* s, A_UTF16Char* dst, int cap)
+    {
+        int i = 0;
+        for (; s[i] && i < cap - 1; ++i)
+            dst[i] = (A_UTF16Char)(unsigned char)s[i];
+        dst[i] = 0;
+    }
+    SPBasicSuite* m_basic = NULL;
+    PFAppSuite6* m_suite = NULL;
+    PF_AppProgressDialogP m_dlg = NULL;
+};
+
 static bool RenderLayerFrames(PF_InData* in_data, PF_OutData* out_data, CK_JobRequest& req,
                               const std::string& staging_dir, std::string& error)
 {
@@ -813,10 +864,17 @@ static bool RenderLayerFrames(PF_InData* in_data, PF_OutData* out_data, CK_JobRe
         return false;
     }
 
+    CK_ProgressDialog progress(in_data, "CorridorKey: rendering the layer's frames for the key");
+
     unsigned long long hash = 1469598103934665603ULL;
     std::vector<float> rgb;
     for (int i = 0; i < req.frames_total; ++i)
     {
+        if (!progress.Update(i, req.frames_total))
+        {
+            error = kCK_Cancelled;
+            return false;
+        }
         const A_long t = (A_long)((double)(req.start_frame + i) * in_data->time_scale / req.fps + 0.5);
         PF_ParamDef p;
         AEFX_CLR_STRUCT(p);
@@ -1210,7 +1268,8 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
         if (!RenderLayerFrames(in_data, out_data, req, staging, error))
         {
             CK_RemoveTree(staging);
-            CK_ShowMessage(title, error);
+            if (error != kCK_Cancelled)
+                CK_ShowMessage(title, error);
             return err;
         }
     }
@@ -1386,8 +1445,35 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
         }
 
         case CK_EDIT_SETTINGS:
-            CK_OpenSettingsFile(CK_LoadGlobalSettings());
+        {
+            CK_GlobalSettings gs = CK_LoadGlobalSettings();
+            const std::string current = CK_ResolveCacheRoot("", gs);
+            const int choice = CK_AskYesNoCancel("CorridorKey_MinionsTake",
+                "Default cache folder for all effects:\n  " + current +
+                "\n\nYes - choose a new default folder"
+                "\nNo - open the full settings file (CorridorKey, python, ffmpeg paths)"
+                "\nCancel - leave it");
+            if (choice == 0)
+            {
+                CK_OpenSettingsFile(gs);
+            }
+            else if (choice == 1)
+            {
+                std::string chosen;
+                if (CK_ChooseFolder(current, chosen))
+                {
+                    if (CK_SetDefaultCacheRoot(chosen))
+                        CK_ShowMessage("CorridorKey_MinionsTake",
+                                       "New keys now cache to:\n  " + chosen +
+                                       "\n\nEffects with their own folder (This Effect's Folder) keep it."
+                                       "\nExisting keys stay where they are.");
+                    else
+                        CK_ShowMessage("CorridorKey_MinionsTake",
+                                       "Couldn't write the settings file:\n  " + gs.settings_file);
+                }
+            }
             break;
+        }
 
         default:
             break;
@@ -1699,6 +1785,8 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
                 case CK_DM_STRONG: s.method = CK_DESPILL_STRONG; break;
                 default:           s.method = CK_DESPILL_AVERAGE; break;
             }
+            if (p_method.u.pd.value == CK_DM_OFF)
+                s.despill = 0.0f;
             // The colour control is in the project's space; despill works in linear.
             const PF_Pixel& pc = p_picked.u.cd.value;
             const float pick[3] = { pc.red / 255.0f, pc.green / 255.0f, pc.blue / 255.0f };
