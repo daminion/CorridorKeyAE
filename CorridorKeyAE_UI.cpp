@@ -231,7 +231,6 @@ static PF_Err IdleStatus(PF_InData* in_data,
     // rendered (as the plain plate) while the cache was still filling.
     if (just_finished)
     {
-        CK_DebugLog("IDLE just_finished: bumping generation (%s)", info.key.c_str());
         CK_EffectData data;
         if (CK_ReadEffectData(in_data, params, &data))
         {

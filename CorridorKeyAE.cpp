@@ -342,7 +342,6 @@ static void BumpRefresh(AEGP_SuiteHandler& suites, A_long item_id, A_long layer_
                     val.val.one_d = val.val.one_d >= 999999.0 ? 0.0 : val.val.one_d + 1.0;
                     suites.StreamSuite5()->AEGP_SetStreamValue(S_plugin_id, streamH, &val);
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&val);
-                    CK_DebugLog("BUMP refresh item=%d layer=%d", (int)item_id, (int)layer_id);
                 }
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
@@ -405,8 +404,6 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
         {
         }
     }
-    if (jobs_changed || compact_changed)
-        CK_DebugLog("HOOK refresh jobs=%d compact=%d", (int)jobs_changed, (int)compact_changed);
     if ((jobs_changed || preview_changed || project_changed || compact_changed) && S_basic)
     {
         try
@@ -1818,10 +1815,6 @@ static PF_Err PreRender(PF_InData* in_data, PF_OutData* out_data,
                                 (st.state == CK_JOB_RUNNING && !st.in_passes && index >= 0 &&
                                  index < st.frames_done - 1);
             }
-            CK_DebugLog("PRE  idx=%d gen=%d avail=%d compacted=%d pv_token=%d pv_state=%d job=%s",
-                        CacheIndexFor(in_data, data), (int)mix.generation, (int)mix.available,
-                        (int)mix.compacted, (int)mix.preview_token, (int)mix.preview_state,
-                        data.job_dir);
             ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(mix), &mix));
         }
         PF_CHECKIN_PARAM(in_data, &p_status);
@@ -2020,17 +2013,9 @@ static PF_Err SmartRender(PF_InData* in_data, PF_OutData* out_data,
             frame = CK_GetKeyedFrame(data.job_dir, CacheIndexFor(in_data, data), data.generation);
 
         // 2. Otherwise a Preview Frame result (keyed from exactly this input).
-        const bool keyed = frame != nullptr;
         const bool is_preview = !frame && data.preview_token > 0;
         if (is_preview)
             frame = GetPreviewFrame(in_data, data, inW, fmt, srgb);
-        {
-            const CK_JobStatus dst = CK_QueryJob(data.job_dir);
-            CK_DebugLog("REND idx=%d gen=%d state=%d frames=%d in_passes=%d keyed=%d preview=%d got=%d",
-                        CacheIndexFor(in_data, data), (int)data.generation, (int)dst.state,
-                        dst.frames_done, (int)dst.in_passes, (int)keyed, (int)is_preview,
-                        (int)(frame != nullptr));
-        }
 
         if (frame)
         {
