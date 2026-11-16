@@ -7,3 +7,5 @@ Release/
 *.pdb
 *.ilk
 *.user
+__pycache__/
+*.pyc
