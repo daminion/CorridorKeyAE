@@ -105,5 +105,20 @@ bool CK_PollTrackedJobs();
 // Fills phase / windows from log text (exposed for testing).
 void CK_ParseJobLog(const std::string& log, CK_JobStatus& st);
 
+// ---- Project folder keys ------------------------------------------------
+
+// Folder created next to the .aep for "Save Keys In: Project Folder"
+#define CK_PROJECT_KEYS_DIR "CorridorKeys"
+
+// Folder of the open project ("" = unsaved). Set from the main thread;
+// returns true if it changed. Safe to read from any thread.
+bool CK_SetProjectDir(const std::string& dir);
+std::string CK_GetProjectDir();
+
+// A stored key folder inside some project's CorridorKeys folder resolves to
+// the same key next to the open project when that copy exists (the project
+// was moved, copied or archived). Anything else is returned unchanged.
+std::string CK_ResolveJobDir(const std::string& stored);
+
 // One-line text for the Status control.
 std::string CK_StatusText(const CK_JobStatus& st, int frames_total);

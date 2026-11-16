@@ -223,6 +223,40 @@ static SPBasicSuite* S_basic = NULL;
 static AEGP_PluginID S_plugin_id = 0;
 static bool S_idle_registered = false;
 
+// Folder of the open .aep ("" when unsaved). AEGP project calls are main
+// thread only, so this runs from the idle hook and Key Clip; render threads
+// read the stored copy through CK_GetProjectDir().
+static std::string QueryProjectDir(SPBasicSuite* basic)
+{
+    std::string dir;
+    if (!basic)
+        return dir;
+    try
+    {
+        AEGP_SuiteHandler suites(basic);
+        AEGP_ProjectH projH = NULL;
+        AEGP_MemHandle pathH = NULL;
+        if (!suites.ProjSuite6()->AEGP_GetProjectByIndex(0, &projH) && projH &&
+            !suites.ProjSuite6()->AEGP_GetProjectPath(projH, &pathH) && pathH)
+        {
+            A_UTF16Char* p = NULL;
+            if (!suites.MemorySuite1()->AEGP_LockMemHandle(pathH, reinterpret_cast<void**>(&p)) && p)
+            {
+                const std::string path = CK_FromUtf16(reinterpret_cast<const unsigned short*>(p));
+                const size_t slash = path.find_last_of("\\/");
+                if (slash != std::string::npos)
+                    dir = path.substr(0, slash);
+                suites.MemorySuite1()->AEGP_UnlockMemHandle(pathH);
+            }
+            suites.MemorySuite1()->AEGP_FreeMemHandle(pathH);
+        }
+    }
+    catch (...)
+    {
+    }
+    return dir;
+}
+
 static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL)
 {
     static unsigned long last = 0;
@@ -242,7 +276,11 @@ static A_Err CK_IdleHook(AEGP_GlobalRefcon, AEGP_IdleRefcon, A_long* max_sleepPL
     last_preview = preview;
     last_info = info;
 
-    if ((CK_PollTrackedJobs() || preview_changed) && S_basic)
+    // Project opened, saved elsewhere or closed: keys in its CorridorKeys
+    // folder resolve differently, so redraw.
+    const bool project_changed = CK_SetProjectDir(QueryProjectDir(S_basic));
+
+    if ((CK_PollTrackedJobs() || preview_changed || project_changed) && S_basic)
     {
         try
         {
@@ -489,26 +527,22 @@ static PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data,
     AEFX_CLR_STRUCT(def);
     PF_ADD_TOPIC(STR(StrID_Cache_Name), CACHE_START_DISK_ID);
 
+    // Read only by Key Clip. The global cache folder is set in the setup menu
+    // (option 6) and also holds Preview Frame results.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX(STR(StrID_CacheLocation_Name),
+                  CK_CL_NUM,
+                  CK_CL_PROJECT,
+                  STR(StrID_CacheLocation_Choices),
+                  PF_ParamFlag_CANNOT_TIME_VARY,
+                  CACHE_LOCATION_DISK_ID);
+
     AEFX_CLR_STRUCT(def);
     PF_ADD_BUTTON(STR(StrID_ChooseCache_Name),
                   STR(StrID_ChooseCache_Button),
                   0,
                   PF_ParamFlag_SUPERVISE | PF_ParamFlag_CANNOT_TIME_VARY,
                   CHOOSE_CACHE_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_BUTTON(STR(StrID_ResetCache_Name),
-                  STR(StrID_ResetCache_Button),
-                  0,
-                  PF_ParamFlag_SUPERVISE | PF_ParamFlag_CANNOT_TIME_VARY,
-                  RESET_CACHE_DISK_ID);
-
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_BUTTON(STR(StrID_EditSettings_Name),
-                  STR(StrID_EditSettings_Button),
-                  0,
-                  PF_ParamFlag_SUPERVISE | PF_ParamFlag_CANNOT_TIME_VARY,
-                  EDIT_SETTINGS_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(CACHE_END_DISK_ID);
@@ -547,6 +581,12 @@ bool CK_ReadEffectData(PF_InData* in_data, PF_ParamDef* params[], CK_EffectData*
     suites.HandleSuite1()->host_unlock_handle(h);
     out->cache_override[CK_PATH_MAX - 1] = '\0';
     out->job_dir[CK_PATH_MAX - 1] = '\0';
+
+    // A key in a moved/copied project's CorridorKeys folder: point at the
+    // copy next to the open project.
+    const std::string resolved = CK_ResolveJobDir(out->job_dir);
+    if (resolved != out->job_dir && resolved.size() < CK_PATH_MAX)
+        SetPathField(out->job_dir, resolved);
     return true;
 }
 
@@ -1248,7 +1288,30 @@ static PF_Err DoKeyClip(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* p
     }
 
     // 4. Where does it go?
-    std::string cache_root = CK_ResolveCacheRoot(data.cache_override, gs);
+    CK_SetProjectDir(QueryProjectDir(in_data->pica_basicP));
+    std::string cache_root;
+    switch (params[CK_CACHE_LOCATION]->u.pd.value)
+    {
+        case CK_CL_CUSTOM:
+            if (!data.cache_override[0])
+            {
+                CK_ShowMessage(title, "Save Keys In is set to Custom Folder, but no folder is chosen.\n\n"
+                                      "Click Custom Folder > Choose... first.");
+                return err;
+            }
+            cache_root = data.cache_override;
+            break;
+        case CK_CL_GLOBAL:
+            cache_root = CK_ResolveCacheRoot("", gs);
+            break;
+        default:
+            cache_root = CK_GetProjectDir();
+            if (cache_root.empty())
+                cache_root = CK_ResolveCacheRoot("", gs);   // unsaved project
+            else
+                cache_root += "\\" CK_PROJECT_KEYS_DIR;
+            break;
+    }
     std::string state = DescribeCacheFolder(cache_root);
     if (state.compare(0, 7, "OFFLINE") == 0)
     {
@@ -1422,54 +1485,10 @@ static PF_Err UserChangedParam(PF_InData* in_data, PF_OutData* out_data,
                 SetPathField(data.cache_override, chosen);
                 err = CK_WriteEffectData(in_data, params, data);
                 if (!err)
-                    CK_ShowMessage("CorridorKey_MinionsTake",
-                                   "This effect will cache new keys to:\n  " + chosen);
-            }
-            break;
-        }
-
-        case CK_RESET_CACHE:
-        {
-            CK_EffectData data;
-            CK_ReadEffectData(in_data, params, &data);
-            SetPathField(data.cache_override, std::string());
-            err = CK_WriteEffectData(in_data, params, data);
-            if (!err)
-            {
-                CK_GlobalSettings gs = CK_LoadGlobalSettings();
-                CK_ShowMessage("CorridorKey_MinionsTake",
-                               "This effect now caches new keys to the default folder:\n  " +
-                               CK_ResolveCacheRoot("", gs));
-            }
-            break;
-        }
-
-        case CK_EDIT_SETTINGS:
-        {
-            CK_GlobalSettings gs = CK_LoadGlobalSettings();
-            const std::string current = CK_ResolveCacheRoot("", gs);
-            const int choice = CK_AskYesNoCancel("CorridorKey_MinionsTake",
-                "Default cache folder for all effects:\n  " + current +
-                "\n\nYes - choose a new default folder"
-                "\nNo - open the full settings file (CorridorKey, python, ffmpeg paths)"
-                "\nCancel - leave it");
-            if (choice == 0)
-            {
-                CK_OpenSettingsFile(gs);
-            }
-            else if (choice == 1)
-            {
-                std::string chosen;
-                if (CK_ChooseFolder(current, chosen))
                 {
-                    if (CK_SetDefaultCacheRoot(chosen))
-                        CK_ShowMessage("CorridorKey_MinionsTake",
-                                       "New keys now cache to:\n  " + chosen +
-                                       "\n\nEffects with their own folder (This Effect's Folder) keep it."
-                                       "\nExisting keys stay where they are.");
-                    else
-                        CK_ShowMessage("CorridorKey_MinionsTake",
-                                       "Couldn't write the settings file:\n  " + gs.settings_file);
+                    // Picking a folder means "use it": switch Save Keys In to Custom.
+                    params[CK_CACHE_LOCATION]->u.pd.value = CK_CL_CUSTOM;
+                    params[CK_CACHE_LOCATION]->uu.change_flags = PF_ChangeFlag_CHANGED_VALUE;
                 }
             }
             break;
@@ -1661,9 +1680,10 @@ static std::shared_ptr<const CK_Frame> GetPreviewFrame(PF_InData* in_data,
     if (data.job_dir[0] && CK_QueryJob(data.job_dir).state == CK_JOB_RUNNING)
         return nullptr;
 
+    // Previews are throwaway, so they always go to the global cache.
     const CK_GlobalSettings gs = CK_LoadGlobalSettings();
-    const std::string cache_root = CK_ResolveCacheRoot(data.cache_override, gs);
-    if (!CK_DirExists(cache_root))
+    const std::string cache_root = CK_ResolveCacheRoot("", gs);
+    if (!CK_DirExists(cache_root) && !CK_MakeDirs(cache_root))
         return nullptr;
 
     const unsigned long long h = HashWorld(inW, fmt, srgb ? 1ULL : 2ULL);

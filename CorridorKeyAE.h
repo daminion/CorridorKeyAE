@@ -17,7 +17,7 @@
 #include "CorridorKeyAE_Strings.h"
 
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 13
+#define MINOR_VERSION 14
 #define BUG_VERSION 0
 #define STAGE_VERSION PF_Stage_DEVELOP
 #define BUILD_VERSION 0
@@ -86,9 +86,8 @@ enum
     CK_RANGE_END,
     // Cache group
     CK_CACHE_START,
-    CK_CHOOSE_CACHE,
-    CK_RESET_CACHE,
-    CK_EDIT_SETTINGS,
+    CK_CACHE_LOCATION,
+    CK_CHOOSE_CACHE,        // shown as "Custom Folder"
     CK_CACHE_END,
     CK_NUM_PARAMS
 };
@@ -108,8 +107,8 @@ enum
     KEY_SETTINGS_END_DISK_ID,       // now the Hint group end
     CACHE_START_DISK_ID,
     CHOOSE_CACHE_DISK_ID,
-    RESET_CACHE_DISK_ID,
-    EDIT_SETTINGS_DISK_ID,
+    RESET_CACHE_DISK_ID,            // retired (v0.14)
+    EDIT_SETTINGS_DISK_ID,          // retired (v0.14)
     STATUS_DISK_ID,
     CACHE_END_DISK_ID,
     WORKING_SPACE_DISK_ID,
@@ -134,7 +133,18 @@ enum
     KEEP_ORIGINAL_DISK_ID,
     // v0.11
     PREVIEW_FRAME_DISK_ID,
-    KEY_SOURCE_DISK_ID
+    KEY_SOURCE_DISK_ID,
+    // v0.14
+    CACHE_LOCATION_DISK_ID
+};
+
+// Cache Location popup: where Key Clip writes new keys
+enum
+{
+    CK_CL_PROJECT = 1,      // <project folder>\CorridorKeys (global cache if unsaved)
+    CK_CL_GLOBAL,           // cache_root from settings.ini
+    CK_CL_CUSTOM,           // this effect's cache_override
+    CK_CL_NUM = CK_CL_CUSTOM
 };
 
 // Key Source popup

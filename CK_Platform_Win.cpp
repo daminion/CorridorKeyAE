@@ -430,21 +430,6 @@ bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8)
                        MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
 }
 
-int CK_AskYesNoCancel(const char* title_utf8, const std::string& body_utf8)
-{
-    const int r = MessageBoxW(GetActiveWindow(), Widen(body_utf8).c_str(),
-                              Widen(title_utf8 ? title_utf8 : "CorridorKey_MinionsTake").c_str(),
-                              MB_YESNOCANCEL | MB_ICONQUESTION | MB_TASKMODAL);
-    return r == IDYES ? 1 : r == IDNO ? 0 : -1;
-}
-
-bool CK_SetDefaultCacheRoot(const std::string& folder_utf8)
-{
-    const CK_GlobalSettings gs = CK_LoadGlobalSettings();   // creates the file if needed
-    return WritePrivateProfileStringW(L"paths", L"cache_root", Widen(folder_utf8).c_str(),
-                                      Widen(gs.settings_file).c_str()) != 0;
-}
-
 void CK_OpenInEditor(const std::string& file_utf8)
 {
     ShellExecuteW(NULL, L"open", L"notepad.exe",

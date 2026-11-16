@@ -20,9 +20,6 @@ struct CK_GlobalSettings
 // the first time.
 CK_GlobalSettings CK_LoadGlobalSettings();
 
-// Writes cache_root in settings.ini (the default for every effect).
-bool CK_SetDefaultCacheRoot(const std::string& folder_utf8);
-
 // Fallback when settings.ini has no cache_root: %LOCALAPPDATA%\CorridorKeyAE\Cache
 std::string CK_DefaultCacheRoot();
 
@@ -72,8 +69,6 @@ int CK_CountExrInSubdir(const std::string& dir_utf8, const char* suffix);
 
 unsigned long CK_TickMs();
 bool CK_AskYesNo(const char* title_utf8, const std::string& body_utf8);
-// 1 = Yes, 0 = No, -1 = Cancel
-int CK_AskYesNoCancel(const char* title_utf8, const std::string& body_utf8);
 void CK_OpenInEditor(const std::string& file_utf8);
 void CK_OpenFolder(const std::string& dir_utf8);
 

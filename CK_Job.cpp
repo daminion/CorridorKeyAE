@@ -545,3 +545,68 @@ std::string CK_StatusText(const CK_JobStatus& st, int frames_total)
     }
     return buf;
 }
+
+// ---------------------------------------------------------------------------
+// Project folder keys
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::mutex g_proj_mutex;
+    std::string g_project_dir;
+
+    struct Resolved
+    {
+        std::string dir;
+        unsigned long tick = 0;
+    };
+    std::map<std::string, Resolved> g_resolved;   // "<stored>|<project>" -> folder
+}
+
+bool CK_SetProjectDir(const std::string& dir)
+{
+    std::lock_guard<std::mutex> lock(g_proj_mutex);
+    if (dir == g_project_dir)
+        return false;
+    g_project_dir = dir;
+    g_resolved.clear();
+    return true;
+}
+
+std::string CK_GetProjectDir()
+{
+    std::lock_guard<std::mutex> lock(g_proj_mutex);
+    return g_project_dir;
+}
+
+std::string CK_ResolveJobDir(const std::string& stored)
+{
+    static const std::string marker = "\\" + Lower(CK_PROJECT_KEYS_DIR) + "\\";
+    const std::string low = Lower(stored);
+    const size_t pos = low.rfind(marker);
+    if (pos == std::string::npos)
+        return stored;
+
+    const std::string proj = CK_GetProjectDir();
+    if (proj.empty())
+        return stored;
+    const std::string candidate = proj + "\\" CK_PROJECT_KEYS_DIR "\\" + stored.substr(pos + marker.size());
+    if (Lower(candidate) == low)
+        return stored;
+
+    const std::string key = stored + "|" + proj;
+    const unsigned long now = CK_TickMs();
+    {
+        std::lock_guard<std::mutex> lock(g_proj_mutex);
+        auto it = g_resolved.find(key);
+        if (it != g_resolved.end() && now - it->second.tick < 2000)
+            return it->second.dir;
+    }
+    // The open project's own copy wins, so an archived project uses its keys.
+    const std::string dir = CK_DirExists(candidate) ? candidate : stored;
+    std::lock_guard<std::mutex> lock(g_proj_mutex);
+    Resolved& r = g_resolved[key];
+    r.dir = dir;
+    r.tick = now ? now : 1;
+    return dir;
+}

@@ -28,7 +28,7 @@ Personal After Effects effect that wraps [CorridorKey 2.0](https://github.com/ni
   - Rendered Key Source shows AE's progress bar with Cancel while it renders the layer's frames.
   - Despill Method: Off (appended, so saved choices don't shift).
   - Keep Original in Solid Areas is on for new effects.
-  - Cache group: This Effect's Folder [Choose...] / [Use Default], and Default for All Effects [Set...] (choose the global cache folder, or open settings.ini).
+- **v0.14 (testing):** Cache group is now **Save Keys In**: Project Folder (default; `<folder of the .aep>\CorridorKeys`, or the global cache while the project is unsaved) / Global Cache / Custom Folder (Choose... picks it and switches to Custom). A key stored in some project's CorridorKeys folder is found next to the open project if the project was moved or copied (the open project's copy wins). Preview Frame results and render staging for Global stay in the global cache (setup menu option 6). The old Reset and Global Settings buttons are gone; settings.ini is edited through the setup menu.
 
 Setup: run `tools\CorridorKey_Setup.bat` (menu) to install CorridorKey 2.0 and point the plug-in at it. Option 7 manages cached keys: lists each key's clip, frames, size, date and state, and deletes picked keys, keys whose source is missing, or keys older than N days (running keys are never deleted).
 
